@@ -261,3 +261,12 @@
   border-radius: 4px;
   padding: 4px 0;
 }
+
+/* Premium visual layer for the real-time command center */
+.simulation-page .ant-card { background: linear-gradient(145deg, #ffffff, #f9fbff); }
+.simulation-page .section-card-component { box-shadow: 0 14px 32px rgba(25, 61, 126, 0.06); }
+.canvas-legend { background: linear-gradient(180deg, #f8fbff, #eef5ff); border-right-color: #e2ebf7; }
+.canvas-area { background: radial-gradient(circle at 50% 35%, #f8fcff, #edf4fb); }
+.canvas-toolbar { background: rgba(255, 255, 255, 0.92); backdrop-filter: blur(10px); border: 1px solid rgba(204, 218, 239, 0.9); border-radius: 10px; }
+.sim-control-bar { background: linear-gradient(95deg, #fff, #f5f9ff); border-radius: 14px; border-color: #dfe9f5; box-shadow: 0 10px 25px rgba(33, 69, 132, 0.06); }
+.agent-card { background: linear-gradient(145deg, #fbfdff, #f3f8ff); border-color: #e1ebf7; border-radius: 12px; }
