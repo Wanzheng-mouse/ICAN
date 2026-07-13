@@ -1,10 +1,11 @@
 /**
- * 资源中心 API（带 React Hooks 封装）
+ * 资源中心 API
  */
 
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { request } from '@/api/client';
 import { USE_MOCK } from '@/api/client';
+import { apiUrl } from '@/utils/apiUrl';
 import {
   featuredCases as mockFeaturedCases,
   hotResources as mockHotResources,
@@ -13,33 +14,27 @@ import {
   scenarioTemplates as mockTemplates,
 } from '@ican/mock-data';
 
-import type {
-  FeaturedCase,
-  HotResource,
-  LearningPathStep,
-  ResourceCategory,
-  SceneTemplate,
-} from '@ican/contracts';
+import type { FeaturedCase, HotResource, LearningPathStep, ResourceCategory, SceneTemplate } from '@ican/contracts';
 
 export async function getFeaturedCases(): Promise<FeaturedCase[]> {
   if (USE_MOCK) return mockFeaturedCases;
-  return request({ url: '/api/resource/featured-cases' });
+  return request({ url: apiUrl('/resource/featured-cases') });
 }
 export async function getHotResources(): Promise<HotResource[]> {
   if (USE_MOCK) return mockHotResources;
-  return request({ url: '/api/resource/hot-resources' });
+  return request({ url: apiUrl('/resource/hot-resources') });
 }
 export async function getLearningPath(): Promise<LearningPathStep[]> {
   if (USE_MOCK) return mockLearningPath;
-  return request({ url: '/api/resource/learning-path' });
+  return request({ url: apiUrl('/resource/learning-path') });
 }
 export async function getResourceCategories(): Promise<ResourceCategory[]> {
   if (USE_MOCK) return mockCategories;
-  return request({ url: '/api/resource/categories' });
+  return request({ url: apiUrl('/resource/categories') });
 }
 export async function getResourceTemplates(): Promise<SceneTemplate[]> {
   if (USE_MOCK) return mockTemplates;
-  return request({ url: '/api/resource/templates' });
+  return request({ url: apiUrl('/resource/templates') });
 }
 
 export function useFeaturedCases(): UseQueryResult<FeaturedCase[]> {
