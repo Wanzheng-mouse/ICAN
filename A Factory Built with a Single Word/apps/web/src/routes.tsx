@@ -3,7 +3,10 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { Spin } from 'antd';
 import { MainLayout } from '@/layouts/MainLayout';
 import { ConsoleLayout } from '@/layouts/ConsoleLayout';
+import { RequireAuth } from '@/components/RequireAuth';
 
+const Login = lazy(() => import('@/pages/Login'));
+const Register = lazy(() => import('@/pages/Login/Register'));
 const Home = lazy(() => import('@/pages/Home'));
 const Simulation = lazy(() => import('@/pages/Simulation'));
 const Evolution = lazy(() => import('@/pages/Evolution'));
@@ -12,6 +15,12 @@ const Resource = lazy(() => import('@/pages/Resource'));
 const Orchestration = lazy(() => import('@/pages/Orchestration'));
 const Editor = lazy(() => import('@/pages/Editor'));
 const Help = lazy(() => import('@/pages/Help'));
+const SearchPage = lazy(() => import('@/pages/Search'));
+const NotificationsPage = lazy(() => import('@/pages/Notifications'));
+const ProfilePage = lazy(() => import('@/pages/Account/Profile'));
+const SettingsPage = lazy(() => import('@/pages/Account/Settings'));
+const PreferencesPage = lazy(() => import('@/pages/Account/Preferences'));
+const AccountLayout = lazy(() => import('@/pages/Account/AccountLayout'));
 
 function PageLoading() {
   return (
@@ -26,15 +35,34 @@ export function AppRoutes() {
   return (
     <Suspense fallback={<PageLoading />}>
       <Routes>
-        <Route
-          path="/"
-          element={
-            <MainLayout>
-              <Home />
-            </MainLayout>
-          }
-        />
-        <Route element={<ConsoleLayout />}>
+        {/* 公开路由 */}
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
+        <Route path="/forgot-password" element={
+          <div style={{ textAlign: 'center', paddingTop: 80 }}>
+            <h2>忘记密码</h2>
+            <p style={{ color: '#6b7280' }}>请联系管理员重置密码（演示）</p>
+          </div>
+        } />
+
+        {/* 首页（需登录） */}
+        <Route path="/" element={<RequireAuth><MainLayout><Home /></MainLayout></RequireAuth>} />
+        <Route path="/help" element={<RequireAuth><MainLayout><Help /></MainLayout></RequireAuth>} />
+
+        {/* 搜索 & 通知 */}
+        <Route path="/search" element={<RequireAuth><MainLayout><SearchPage /></MainLayout></RequireAuth>} />
+        <Route path="/notifications" element={<RequireAuth><MainLayout variant="wide"><NotificationsPage /></MainLayout></RequireAuth>} />
+
+        {/* 账号中心 */}
+        <Route path="/account" element={<RequireAuth><MainLayout variant="wide"><AccountLayout /></MainLayout></RequireAuth>}>
+          <Route index element={<ProfilePage />} />
+          <Route path="profile" element={<ProfilePage />} />
+          <Route path="settings" element={<SettingsPage />} />
+          <Route path="preferences" element={<PreferencesPage />} />
+        </Route>
+
+        {/* 仿真空间 */}
+        <Route element={<RequireAuth><ConsoleLayout /></RequireAuth>}>
           <Route path="/simulation" element={<Simulation />} />
           <Route path="/simulation/tasks" element={<Simulation />} />
           <Route path="/simulation/devices" element={<Simulation />} />
@@ -44,54 +72,14 @@ export function AppRoutes() {
           <Route path="/simulation/dashboard" element={<Simulation />} />
           <Route path="/simulation/settings" element={<Simulation />} />
         </Route>
-        <Route
-          path="/evolution"
-          element={
-            <MainLayout variant="wide">
-              <Evolution />
-            </MainLayout>
-          }
-        />
-        <Route
-          path="/report"
-          element={
-            <MainLayout variant="wide">
-              <Report />
-            </MainLayout>
-          }
-        />
-        <Route
-          path="/resource"
-          element={
-            <MainLayout variant="wide">
-              <Resource />
-            </MainLayout>
-          }
-        />
-        <Route
-          path="/orchestration"
-          element={
-            <MainLayout variant="wide">
-              <Orchestration />
-            </MainLayout>
-          }
-        />
-        <Route
-          path="/editor"
-          element={
-            <MainLayout variant="wide">
-              <Editor />
-            </MainLayout>
-          }
-        />
-        <Route
-          path="/help"
-          element={
-            <MainLayout>
-              <Help />
-            </MainLayout>
-          }
-        />
+
+        {/* 其他业务页 */}
+        <Route path="/evolution" element={<RequireAuth><MainLayout variant="wide"><Evolution /></MainLayout></RequireAuth>} />
+        <Route path="/report" element={<RequireAuth><MainLayout variant="wide"><Report /></MainLayout></RequireAuth>} />
+        <Route path="/resource" element={<RequireAuth><MainLayout variant="wide"><Resource /></MainLayout></RequireAuth>} />
+        <Route path="/orchestration" element={<RequireAuth><MainLayout variant="wide"><Orchestration /></MainLayout></RequireAuth>} />
+        <Route path="/editor" element={<RequireAuth><MainLayout variant="wide"><Editor /></MainLayout></RequireAuth>} />
+
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Suspense>
