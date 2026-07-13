@@ -1,9 +1,12 @@
 .kpi-card {
   position: relative;
   height: 100%;
-  background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
-  border-radius: 10px !important;
+  background: linear-gradient(145deg, #ffffff 0%, #f7faff 100%);
+  border-radius: 16px !important;
+  transition: transform 0.22s ease, box-shadow 0.22s ease;
 }
+
+.kpi-card:hover { transform: translateY(-3px); box-shadow: 0 18px 28px rgba(26, 62, 132, 0.1) !important; }
 
 .kpi-card .ant-card-body {
   padding: 16px 18px;
@@ -24,9 +27,9 @@
 }
 
 .kpi-value {
-  font-size: 26px;
-  font-weight: 600;
-  color: #1f2937;
+  font-size: 28px;
+  font-weight: 700;
+  color: #152446;
   line-height: 1.2;
 }
 
