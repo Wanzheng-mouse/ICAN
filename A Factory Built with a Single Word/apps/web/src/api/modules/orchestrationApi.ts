@@ -1,10 +1,11 @@
 /**
- * 任务编排 API（带 React Hooks 封装）
+ * 任务编排 API
  */
 
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { request } from '@/api/client';
 import { USE_MOCK } from '@/api/client';
+import { apiUrl } from '@/utils/apiUrl';
 import {
   orchestrationAgents as mockAgents,
   orchestrationTaskQueue as mockQueue,
@@ -24,31 +25,31 @@ export type OrchestrationAbnormalBranch = { title: string };
 
 export async function getOrchestrationAgents(): Promise<Agent[]> {
   if (USE_MOCK) return mockAgents;
-  return request({ url: '/api/orchestration/agents' });
+  return request({ url: apiUrl('/orchestration/agents') });
 }
 export async function getOrchestrationQueue(): Promise<Task[]> {
   if (USE_MOCK) return mockQueue;
-  return request({ url: '/api/orchestration/queue' });
+  return request({ url: apiUrl('/orchestration/queue') });
 }
 export async function getOrchestrationFlowNodes(): Promise<AgentFlowNode[]> {
   if (USE_MOCK) return mockFlowNodes;
-  return request({ url: '/api/orchestration/flow-nodes' });
+  return request({ url: apiUrl('/orchestration/flow-nodes') });
 }
 export async function getOrchestrationFlowEdges(): Promise<AgentFlowEdge[]> {
   if (USE_MOCK) return mockFlowEdges;
-  return request({ url: '/api/orchestration/flow-edges' });
+  return request({ url: apiUrl('/orchestration/flow-edges') });
 }
 export async function getOrchestrationStrategy(): Promise<OrchestrationStrategyParams> {
   if (USE_MOCK) return mockParams;
-  return request({ url: '/api/orchestration/strategy' });
+  return request({ url: apiUrl('/orchestration/strategy') });
 }
 export async function getOrchestrationGoal(): Promise<OrchestrationTaskGoal> {
   if (USE_MOCK) return mockGoal;
-  return request({ url: '/api/orchestration/goal' });
+  return request({ url: apiUrl('/orchestration/goal') });
 }
 export async function getOrchestrationBranches(): Promise<OrchestrationAbnormalBranch[]> {
   if (USE_MOCK) return mockBranches;
-  return request({ url: '/api/orchestration/branches' });
+  return request({ url: apiUrl('/orchestration/branches') });
 }
 
 export function useOrchestrationAgents(): UseQueryResult<Agent[]> {
