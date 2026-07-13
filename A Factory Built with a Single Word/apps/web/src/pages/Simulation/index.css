@@ -1,0 +1,263 @@
+.simulation-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 12px;
+}
+
+@media (max-width: 1400px) {
+  .kpi-row { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 768px) {
+  .kpi-row { grid-template-columns: repeat(2, 1fr); }
+}
+
+.sim-grid {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 16px;
+}
+
+@media (max-width: 1280px) {
+  .sim-grid { grid-template-columns: 1fr; }
+}
+
+.sim-main { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.sim-aside { min-width: 0; }
+
+.sim-canvas-card { padding: 0; }
+.sim-canvas-card .ant-card-body { padding: 0; }
+
+.canvas-with-legend {
+  display: flex;
+  height: 520px;
+}
+
+.canvas-legend {
+  width: 160px;
+  background: #fafbfd;
+  border-right: 1px solid #eef0f4;
+  padding: 16px;
+  overflow: auto;
+  flex-shrink: 0;
+}
+
+.legend-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+  margin-bottom: 10px;
+}
+
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: #4b5563;
+}
+
+.legend-marker {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.canvas-area {
+  position: relative;
+  flex: 1;
+  background: #f8fafc;
+  overflow: hidden;
+}
+
+.sim-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.canvas-toolbar {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: 0 2px 8px rgba(11, 23, 51, 0.1);
+}
+
+.sim-control-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: #fff;
+  border-radius: 8px;
+  border: 1px solid #eef0f4;
+}
+
+.sim-speed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.speed-label {
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.sim-info-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 1024px) {
+  .sim-info-grid { grid-template-columns: 1fr; }
+}
+
+.event-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.event-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  padding: 4px 0;
+}
+
+.event-time {
+  color: #6b7280;
+  font-size: 12px;
+  width: 60px;
+  flex-shrink: 0;
+}
+
+.event-level {
+  display: flex;
+  align-items: center;
+  width: 20px;
+  flex-shrink: 0;
+}
+
+.event-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.event-dot.info { background: #3b82f6; }
+.event-dot.success { background: #22c55e; }
+.event-dot.warn { background: #f59e0b; }
+.event-dot.error { background: #ef4444; }
+
+.event-msg {
+  color: #1f2937;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.info-table {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+}
+
+.info-label { color: #6b7280; }
+.info-val { color: #1f2937; }
+
+.agent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.agent-card {
+  background: #fafbfd;
+  border: 1px solid #eef0f4;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.agent-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.agent-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.name-text { font-size: 13px; }
+
+.primary-tag { font-size: 10px !important; padding: 0 4px !important; line-height: 16px !important; }
+
+.agent-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.agent-stat {
+  text-align: center;
+  background: #fff;
+  border-radius: 4px;
+  padding: 6px 0;
+}
+
+.stat-label {
+  font-size: 11px;
+  color: #9ca3af;
+  margin-bottom: 2px;
+}
+
+.stat-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.stat-unit {
+  font-size: 10px;
+  color: #9ca3af;
+  font-weight: 400;
+}
+
+.agent-sparkline {
+  background: #fff;
+  border-radius: 4px;
+  padding: 4px 0;
+}

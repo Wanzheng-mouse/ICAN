@@ -1,0 +1,17 @@
+# 依赖
+node_modules/
+.pnpm-store/
+dist/
+build/
+
+# 日志
+*.log
+
+# 环境
+.env
+.env.local
+
+# 缓存
+.cache/
+.turbo/
+.eslintcache

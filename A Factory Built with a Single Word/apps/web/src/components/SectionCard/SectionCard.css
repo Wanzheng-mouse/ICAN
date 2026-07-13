@@ -1,0 +1,25 @@
+.section-card-component {
+  background: #fff;
+  border-radius: 10px;
+}
+
+.section-card-component .ant-card-body {
+  padding: 16px 20px;
+}
+
+.section-card-title {
+  display: flex;
+  align-items: center;
+  font-size: 15px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.section-card-title .title-text {
+  display: inline-flex;
+  align-items: center;
+}
+
+.section-card-body {
+  padding-right: 4px;
+}

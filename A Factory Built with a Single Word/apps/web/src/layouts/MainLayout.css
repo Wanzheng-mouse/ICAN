@@ -1,0 +1,129 @@
+.ican-main-layout {
+  min-height: 100vh;
+}
+
+.ican-main-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  padding: 0 24px !important;
+  height: 60px !important;
+  background: linear-gradient(90deg, #0b1733 0%, #142450 100%) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  gap: 24px;
+}
+
+.ican-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+  min-width: 200px;
+}
+
+.ican-logo-icon {
+  display: flex;
+  align-items: center;
+}
+
+.ican-logo-text .title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 1px;
+  line-height: 1.1;
+}
+
+.ican-logo-text .subtitle {
+  font-size: 11px;
+  color: #94a3b8;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.ican-top-menu {
+  flex: 1;
+  background: transparent !important;
+  border-bottom: none !important;
+  min-width: 0;
+}
+
+.ican-top-menu .ant-menu-item {
+  color: #cbd5e1 !important;
+  font-size: 15px;
+  padding: 0 18px !important;
+}
+
+.ican-top-menu .ant-menu-item-selected {
+  color: #fff !important;
+  background: transparent !important;
+}
+
+.ican-top-menu .ant-menu-item-selected::after {
+  border-bottom-color: #2b6fff !important;
+  border-bottom-width: 3px !important;
+}
+
+.ican-header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ican-search-input {
+  width: 200px;
+  background: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 6px;
+}
+
+.ican-search-input .ant-input {
+  background: transparent !important;
+  color: #fff !important;
+}
+
+.ican-search-input .ant-input::placeholder {
+  color: #94a3b8;
+}
+
+.ican-project-btn {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  color: #fff !important;
+  border-radius: 6px;
+}
+
+.ican-user {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
+.ican-user:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.ican-user .avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #fff;
+}
+
+.ican-content {
+  padding: 20px 24px;
+  background: #f5f7fb;
+  min-height: calc(100vh - 60px);
+}
+
+.ican-content-wide {
+  padding: 20px 24px;
+  background: #f5f7fb;
+  min-height: calc(100vh - 60px);
+}

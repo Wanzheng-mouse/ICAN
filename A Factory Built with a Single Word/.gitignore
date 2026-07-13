@@ -1,0 +1,104 @@
+# ------------------------------------------------------------
+# Node.js / TypeScript（apps、packages）
+# ------------------------------------------------------------
+node_modules/
+.pnpm-store/
+.npm/
+.yarn/
+
+# Build outputs and TypeScript incremental-build artifacts
+dist/
+build/
+out/
+.turbo/
+*.tsbuildinfo
+
+# vite.config.js is emitted from vite.config.ts by the current TS build;
+# vite.config.ts remains the only source of truth.
+/apps/web/vite.config.js
+
+# Test coverage, browser-test artifacts and caches
+coverage/
+.nyc_output/
+.cache/
+.eslintcache
+.vite/
+playwright-report/
+test-results/
+blob-report/
+
+# Package-manager and application logs
+*.log
+logs/
+*.log.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Local environment overrides / secrets
+# Deliberately do not ignore .env.development, .env.production and .env.test:
+# these checked-in files may contain non-sensitive, shareable defaults.
+.env
+.env.local
+.env.*.local
+.env.*.secret
+.envrc
+
+# ------------------------------------------------------------
+# Python / FastAPI（services）
+# ------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.hypothesis/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+pip-wheel-metadata/
+*.egg-info/
+.eggs/
+*.egg
+*.whl
+*.sqlite3
+*.db
+.ipynb_checkpoints/
+
+# ------------------------------------------------------------
+# Generated scenario / report artifacts
+# Keep .gitkeep so the empty folders remain in Git. Source scenarios that
+# need versioning should live outside these generated paths.
+# ------------------------------------------------------------
+scenarios/*.json
+!scenarios/.gitkeep
+reports/*.pdf
+reports/*.pptx
+reports/*.png
+reports/*.csv
+!reports/.gitkeep
+
+# ------------------------------------------------------------
+# IDE, operating-system and temporary files
+# ------------------------------------------------------------
+.vscode/
+.idea/
+*.code-workspace
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/

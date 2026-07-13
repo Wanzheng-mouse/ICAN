@@ -1,0 +1,21 @@
+{
+  "name": "ican-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ICAN - DuMate: 无人仓生成与进化平台",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=@ican/web",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "clean": "npm run clean --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  }
+}

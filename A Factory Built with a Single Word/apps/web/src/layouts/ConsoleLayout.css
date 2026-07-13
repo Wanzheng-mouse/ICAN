@@ -1,0 +1,53 @@
+.ican-console-layout {
+  background: transparent !important;
+  min-height: calc(100vh - 60px);
+}
+
+.ican-console-sider {
+  background: #0b1733 !important;
+  border-radius: 10px;
+  margin-right: 16px;
+  margin-bottom: 16px;
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 76px);
+  position: sticky !important;
+  top: 76px;
+  overflow: auto;
+}
+
+.ican-side-menu {
+  background: transparent !important;
+  border-right: none !important;
+  flex: 1;
+}
+
+.ican-side-menu .ant-menu-item {
+  margin: 4px 12px !important;
+  border-radius: 6px !important;
+  color: #cbd5e1 !important;
+  font-size: 14px;
+}
+
+.ican-side-menu .ant-menu-item-selected {
+  background: #1c2756 !important;
+  color: #fff !important;
+}
+
+.ican-sider-footer {
+  padding: 14px 20px;
+  color: #64748b;
+  font-size: 13px;
+  cursor: pointer;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.ican-sider-footer:hover {
+  color: #fff;
+}
+
+.ican-console-content {
+  background: transparent !important;
+  padding: 0;
+}

@@ -1,0 +1,185 @@
+import type {
+  Agent,
+  KpiCardData,
+  SimulationEvent,
+  SimulationRun,
+} from '@ican/contracts';
+
+export const consoleKpis: KpiCardData[] = [
+  {
+    title: 'AGV 在线数',
+    value: '128 / 150',
+    delta: 85.3,
+    deltaLabel: '在线率',
+    trend: 'flat',
+    iconColor: '#3b82f6',
+  },
+  {
+    title: '当前订单数',
+    value: 286,
+    delta: 18.7,
+    deltaLabel: '较昨日',
+    trend: 'up',
+    iconColor: '#06b6d4',
+  },
+  {
+    title: '平均等待时长',
+    value: '1.82',
+    unit: 'min',
+    delta: -8.6,
+    deltaLabel: '较昨日',
+    trend: 'down',
+    iconColor: '#22c55e',
+  },
+  {
+    title: '拥堵次数',
+    value: 7,
+    unit: '次',
+    delta: -30.0,
+    deltaLabel: '较昨日',
+    trend: 'down',
+    iconColor: '#ef4444',
+  },
+  {
+    title: '任务完成率',
+    value: '96.8',
+    unit: '%',
+    delta: 2.3,
+    deltaLabel: '较昨日',
+    trend: 'up',
+    iconColor: '#22c55e',
+  },
+  {
+    title: '设备健康度',
+    value: '94.2',
+    unit: '%',
+    delta: 1.1,
+    deltaLabel: '较昨日',
+    trend: 'up',
+    iconColor: '#ec4899',
+  },
+];
+
+export const consoleAgents: Agent[] = [
+  {
+    id: 'agent-dispatch',
+    name: '总调度智能体',
+    role: 'dispatch',
+    status: 'running',
+    load: 42,
+    latency: 210,
+    successRate: 99.2,
+    isPrimary: true,
+    details: [
+      { label: '决策频率', value: '2.1', unit: 'Hz' },
+      { label: '任务分配', value: 286 },
+      { label: '队列长度', value: 42 },
+    ],
+    sparkline: [38, 42, 39, 45, 43, 41, 44, 42, 40, 43, 42, 41, 42],
+  },
+  {
+    id: 'agent-nav',
+    name: '导航智能体',
+    role: 'navigation',
+    status: 'running',
+    load: 36,
+    latency: 180,
+    successRate: 98.7,
+    details: [
+      { label: '路径规划', value: 128 },
+      { label: '重规划率', value: '3.2', unit: '%' },
+      { label: '平均耗时', value: '42', unit: 'ms' },
+    ],
+    sparkline: [30, 35, 33, 38, 36, 34, 37, 36, 35, 36, 35, 36, 36],
+  },
+  {
+    id: 'agent-arm',
+    name: '机械臂智能体',
+    role: 'operation',
+    status: 'running',
+    load: 58,
+    latency: 240,
+    successRate: 98.9,
+    details: [
+      { label: '执行任务', value: 96 },
+      { label: '成功率', value: '98.1', unit: '%' },
+      { label: '平均耗时', value: '1.24', unit: 's' },
+    ],
+    sparkline: [50, 55, 53, 60, 58, 56, 59, 58, 57, 58, 58, 59, 58],
+  },
+  {
+    id: 'agent-energy',
+    name: '安全智能体',
+    role: 'safety',
+    status: 'running',
+    load: 18,
+    latency: 150,
+    successRate: 99.5,
+    details: [
+      { label: '风险检测', value: 12 },
+      { label: '拦截次数', value: 2 },
+      { label: '告警级别', value: '低' },
+    ],
+    sparkline: [15, 17, 16, 19, 18, 17, 18, 18, 17, 18, 18, 18, 18],
+  },
+  {
+    id: 'agent-eval',
+    name: '评估智能体',
+    role: 'evaluation',
+    status: 'running',
+    load: 22,
+    latency: 170,
+    successRate: 99.1,
+    details: [
+      { label: '评估频率', value: '1.0', unit: 'Hz' },
+      { label: '策略评分', value: 92.6 },
+      { label: '改进建议', value: 8 },
+    ],
+    sparkline: [20, 22, 21, 23, 22, 21, 22, 22, 22, 22, 22, 22, 22],
+  },
+];
+
+export const consoleEvents: SimulationEvent[] = [
+  { id: 'e1', level: 'warn', time: '10:32:15', message: 'A-025 在 Aisle 12 与 A-118 路径冲突，已触发避让重规划' },
+  { id: 'e2', level: 'info', time: '10:32:12', message: '订单 #SO-20240520-1189 已分配给拣选工作站 P-07' },
+  { id: 'e3', level: 'success', time: '10:32:09', message: 'AGV A-067 完成任务 T-8842，耗时 2分18秒' },
+  { id: 'e4', level: 'warn', time: '10:32:03', message: 'Aisle 08 拥堵等级升高 (中 → 高)，建议分流' },
+  { id: 'e5', level: 'info', time: '10:31:58', message: '机械臂 M-03 完成拣选任务，成功率 100%' },
+  { id: 'e6', level: 'info', time: '10:31:52', message: 'AGV A-118 触发充电策略，调度至充电桩 C-03' },
+  { id: 'e7', level: 'success', time: '10:31:45', message: '订单 #SO-20240520-1190 已完成出库' },
+];
+
+export const consoleRun: SimulationRun = {
+  id: 'run-20250520-001',
+  projectId: 'proj-001',
+  scenarioId: 'scn-ecom-001',
+  status: 'running',
+  startTime: '2025-05-20 08:18:22',
+  speed: 1.0,
+  randomSeed: 202505200818,
+  version: 'v2.4.1',
+  strategy: 'Strategy-v2.4.1-20250520',
+  totalOrders: 286,
+  completedOrders: 277,
+};
+
+export const consoleSceneInfo = {
+  sceneName: '电商中型仓-双波次拣选场景',
+  sceneType: '电商中型仓',
+  duration: '02:13:47',
+  startTime: '2025-05-20 08:18:22',
+};
+
+export const simulationLegend = [
+  { key: 'agv-idle', label: 'AGV（空闲）', color: '#3b82f6' },
+  { key: 'agv-running', label: 'AGV（执行中）', color: '#06b6d4' },
+  { key: 'agv-charging', label: 'AGV（充电中）', color: '#22c55e' },
+  { key: 'pick-station', label: '拣选工作站', color: '#a855f7' },
+  { key: 'sort-station', label: '分拣工作站', color: '#f59e0b' },
+  { key: 'charger', label: '充电桩', color: '#10b981' },
+  { key: 'path-global', label: '路径（全局）', color: '#3b82f6' },
+  { key: 'path-local', label: '路径（局部）', color: '#22c55e', dashed: true },
+  { key: 'congestion-high', label: '拥堵区域（高）', color: '#ef4444' },
+  { key: 'congestion-mid', label: '拥堵区域（中）', color: '#f59e0b' },
+  { key: 'anomaly', label: '异常点', color: '#fbbf24' },
+];
