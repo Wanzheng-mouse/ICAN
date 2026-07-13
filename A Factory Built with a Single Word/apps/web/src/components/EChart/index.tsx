@@ -1,6 +1,5 @@
 import { useEffect, useRef } from 'react';
 import { init } from 'echarts';
-import { useAppStore } from '@/stores/useAppStore';
 
 interface EChartProps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -22,13 +21,12 @@ interface EChartProps {
 export function EChart({ option, height = 320, width = '100%', className, onClick }: EChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<ReturnType<typeof init> | null>(null);
-  const themeMode = useAppStore((s) => s.theme);
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
-    const chart = init(el, themeMode === 'dark' ? 'dark' : undefined, {
+    const chart = init(el, undefined, {
       renderer: 'canvas',
     });
     chartRef.current = chart;
@@ -45,8 +43,7 @@ export function EChart({ option, height = 320, width = '100%', className, onClic
       chart.dispose();
       chartRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [themeMode]);
+  }, [onClick]);
 
   useEffect(() => {
     if (chartRef.current) {
