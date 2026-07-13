@@ -17,7 +17,8 @@ import {
 } from '@ant-design/icons';
 import { App, Button, Input, Progress, Skeleton, Space, Steps, Tag, Tooltip, Upload, type UploadProps } from 'antd';
 import { useNavigate } from 'react-router-dom';
-import { homeStaticData, useTemplates } from '@/api/modules';
+import { homeStaticData, useTemplates, createProject, createScenario } from '@/api/modules';
+import { useAppStore } from '@/stores/useAppStore';
 import { HeroIllustration } from '@/components';
 import { heroBanner, requirementPlaceholder } from '@ican/mock-data';
 import './index.css';
@@ -41,12 +42,6 @@ const templateCoverColors: Record<string, [string, string]> = {
   medical: ['#dcfce7', '#bbf7d0'],
 };
 
-const templateRouteMap: Record<string, string> = {
-  '电商中型仓': '/editor',
-  '冷链多温区': '/editor',
-  '3C 高峰订单': '/editor',
-  '医药合规仓': '/editor',
-};
 
 const sampleRequirements = [
   '根据仓库平面图和今日订单，自动创建无人仓仿真方案，并优化拥堵、充电策略和任务分配效率。',
@@ -77,19 +72,17 @@ function _TemplateCover({ cover, name }: { cover: string; name?: string }) {
 export default function Home() {
   const { message } = App.useApp();
   const navigate = useNavigate();
+  const setProjectContext = useAppStore((s) => s.setProjectContext);
   const [requirement, setRequirement] = useState('');
   const [uploadedSlots, setUploadedSlots] = useState<Record<string, boolean>>({});
   const [generating, setGenerating] = useState(false);
   const [genStep, setGenStep] = useState(0);
 
-  // 阶段 1：直接通过 homeStaticData 获取；阶段 2：可改为 useTemplates 等异步 hook
   const cards = useMemo(() => homeStaticData.cards(), []);
   const features = useMemo(() => homeStaticData.features(), []);
   const steps = useMemo(() => homeStaticData.steps(), []);
   const uploads = useMemo(() => homeStaticData.uploadItems(), []);
-  // 演示异步查询（始终返回 mock），用于将来切真实后端时验证 QueryClient 流程
   const { isLoading: templatesLoading } = useTemplates('scene');
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
 
   const handleUpload: UploadProps['customRequest'] = (options) => {
     setTimeout(() => {
@@ -101,25 +94,32 @@ export default function Home() {
     }, 400);
   };
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     if (!requirement.trim()) {
       message.warning('请先输入需求');
       return;
     }
     setGenerating(true);
     setGenStep(0);
+    // 创建项目
+    const proj = await createProject({ name: requirement.slice(0, 40), requirement });
+    // 创建场景
+    const scn = await createScenario({ project_id: proj.id, name: `${requirement.slice(0, 20)}场景`, data: { components: [], canvas: { width: 1200, height: 800, scale: 1 }, schema_version: '1.0' } });
+    // 写入上下文
+    setProjectContext({ projectId: proj.id, scenarioId: scn.id });
+    // 模拟进度动画
     const interval = setInterval(() => {
       setGenStep((prev) => {
         if (prev >= 6) {
           clearInterval(interval);
           setGenerating(false);
-          message.success('方案生成完成！即将跳转到场景编辑器');
-          setTimeout(() => navigate('/editor'), 1200);
+          message.success(`方案已创建（项目: ${proj.id} / 场景: ${scn.id}）`);
+          setTimeout(() => navigate(`/editor?projectId=${proj.id}&scenarioId=${scn.id}`), 800);
           return 6;
         }
         return prev + 1;
       });
-    }, 700);
+    }, 500);
   };
 
   const handleUseExample = () => {
@@ -128,15 +128,20 @@ export default function Home() {
     message.info('已填入示例需求');
   };
 
-  const handleTemplateAction = (tplTitle: string, action: 'preview' | 'use' | 'quick') => {
+  const handleTemplateAction = async (tplTitle: string, action: 'preview' | 'use' | 'quick') => {
     if (action === 'preview') {
       message.info(`正在预览「${tplTitle}」场景模板`);
     } else if (action === 'use') {
-      message.success(`已应用「${tplTitle}」模板，正在跳转到场景编辑器`);
-      setTimeout(() => navigate(templateRouteMap[tplTitle] ?? '/editor'), 800);
+      const proj = await createProject({ name: tplTitle, requirement: `使用模板 ${tplTitle}` });
+      const scn = await createScenario({ project_id: proj.id, name: `${tplTitle}场景`, data: { components: [], canvas: { width: 1200, height: 800, scale: 1 }, schema_version: '1.0' } });
+      setProjectContext({ projectId: proj.id, scenarioId: scn.id });
+      message.success(`已创建项目「${tplTitle}」，跳转编辑器`);
+      setTimeout(() => navigate(`/editor?projectId=${proj.id}&scenarioId=${scn.id}`), 600);
     } else if (action === 'quick') {
-      message.loading('快速体验模式：已启动「' + tplTitle + '」仿真', 1.2);
-      setTimeout(() => navigate('/simulation'), 1300);
+      const proj = await createProject({ name: `快速体验-${tplTitle}`, requirement: `快速体验 ${tplTitle}` });
+      setProjectContext({ projectId: proj.id });
+      message.success('快速体验模式已启动');
+      setTimeout(() => navigate('/simulation'), 800);
     }
   };
 
