@@ -3,7 +3,12 @@ from app.main import app
 
 def test_mvp_flow():
     with TestClient(app) as client:
-        assert client.get("/api/v1/health").json()["status"] == "ok"
+        assert client.get("/health").json()["status"] == "ok"
+        templates = client.get("/api/templates", params={"category": "scene"})
+        assert templates.status_code == 200
+        assert templates.json()[0]["title"] == "电商中型仓模板"
+        assert client.get("/docs").status_code == 200
+        assert "updatedAt" in templates.json()[0]
         project = client.post("/api/v1/projects", json={"name": "MVP Warehouse"}).json()
         scenario = client.post(
             "/api/v1/scenarios",

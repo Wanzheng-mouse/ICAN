@@ -55,6 +55,23 @@ class Project(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class Template(Base):
+    """A reusable scenario or resource template shown by the web application."""
+
+    __tablename__ = "templates"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    category: Mapped[str] = mapped_column(String(32), index=True)
+    title: Mapped[str] = mapped_column(String(120))
+    description: Mapped[str] = mapped_column(Text)
+    cover: Mapped[str] = mapped_column(String(64), default="warehouse")
+    industry: Mapped[str] = mapped_column(String(64), default="通用")
+    difficulty: Mapped[str] = mapped_column(String(16), default="easy")
+    downloads: Mapped[int] = mapped_column(default=0)
+    views: Mapped[int] = mapped_column(default=0)
+    updated_at: Mapped[str] = mapped_column(String(10))
+    scenario: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
 class Scenario(Base):
     __tablename__ = "scenarios"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -104,6 +121,20 @@ class ProjectRead(ProjectCreate):
     id: str
     status: str
     created_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class TemplateRead(BaseModel):
+    id: str
+    category: str
+    title: str
+    description: str
+    cover: str
+    industry: str
+    difficulty: str
+    downloads: int
+    views: int
+    updated_at: str = Field(serialization_alias="updatedAt")
     model_config = {"from_attributes": True}
 
 
@@ -167,17 +198,21 @@ class EvolutionRead(BaseModel):
 
 
 # ---- Domain services -------------------------------------------------------
-TEMPLATES = [{
-    "id": "ecommerce-medium",
-    "name": "电商中型仓",
-    "description": "用于 10 台 AGV 与 20 个订单演示的默认模板。",
-    "scenario": {
-        "schema_version": "1.0",
-        "canvas": {"width": 1200, "height": 800, "scale": 1},
-        "shelves": [], "stations": [], "charging_stations": [],
-        "robots": [], "nodes": [], "edges": [], "restricted_areas": [],
-    },
-}]
+DEFAULT_TEMPLATES = [
+    {"id": "tpl-1", "category": "scene", "title": "电商中型仓模板", "description": "适用于日均单量 1-5 万单的电商中型仓场景，含标准货架与设备配置。", "cover": "ecom", "industry": "电商", "difficulty": "easy", "downloads": 1200, "views": 356, "updated_at": "2024-05-20", "scenario": {"schema_version": "1.0", "canvas": {"width": 1200, "height": 800, "scale": 1}, "shelves": [], "stations": [], "charging_stations": [], "robots": [], "nodes": [], "edges": [], "restricted_areas": []}},
+    {"id": "tpl-2", "category": "scene", "title": "冷链双温区模板", "description": "双温区冷链仓库场景，支持温区隔离、温控策略与专用设备配置。", "cover": "coldchain", "industry": "冷链", "difficulty": "medium", "downloads": 987, "views": 298, "updated_at": "2024-05-18", "scenario": {}},
+    {"id": "tpl-3", "category": "strategy", "title": "AGV 拥堵优化策略", "description": "基于路径重规划与分区调度的拥堵优化策略，提升通行效率。", "cover": "strategy", "industry": "通用", "difficulty": "medium", "downloads": 2300, "views": 512, "updated_at": "2024-05-15", "scenario": {}},
+    {"id": "tpl-4", "category": "report", "title": "医药合规报告模板", "description": "符合 GSP/GDP 要求的合规报告模板，自动生成关键指标与审计日志。", "cover": "report", "industry": "医药", "difficulty": "hard", "downloads": 1100, "views": 277, "updated_at": "2024-05-12", "scenario": {}},
+]
+
+
+def seed_templates(db: Session) -> None:
+    """Insert the Week 1 templates once, without replacing user-managed records."""
+    for template in DEFAULT_TEMPLATES:
+        if db.get(Template, template["id"]) is None:
+            db.add(Template(**template))
+    db.commit()
+
 
 
 class SimulationService:
@@ -259,6 +294,8 @@ def get_or_404(model, item_id: str, db: Session, label: str):
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
+    with SessionLocal() as db:
+        seed_templates(db)
     yield
 
 
@@ -273,14 +310,19 @@ app.add_middleware(
 PREFIX = "/api/v1"
 
 
+@app.get("/health", tags=["system"], summary="Check API health")
 @app.get(f"{PREFIX}/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "service": "ican-api"}
 
 
-@app.get(f"{PREFIX}/templates")
-def list_templates() -> dict[str, list[dict[str, Any]]]:
-    return {"items": TEMPLATES}
+@app.get("/api/templates", response_model=list[TemplateRead], tags=["templates"], summary="List seeded templates")
+@app.get(f"{PREFIX}/templates", response_model=list[TemplateRead], tags=["templates"], summary="List seeded templates")
+def list_templates(category: str | None = None, db: Session = Depends(get_db)) -> list[Template]:
+    query = db.query(Template)
+    if category:
+        query = query.filter(Template.category == category)
+    return list(query.order_by(Template.id).all())
 
 
 @app.post(f"{PREFIX}/projects", response_model=ProjectRead, status_code=status.HTTP_201_CREATED)
