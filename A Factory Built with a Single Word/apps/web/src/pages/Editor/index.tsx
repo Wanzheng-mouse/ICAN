@@ -242,7 +242,7 @@ export default function Editor() {
   const handleSave = () => {
     setSaveStatus('saving');
     saveMutation.mutate(components, {
-      onSuccess: (result) => {
+      onSuccess: (result: { savedAt: string }) => {
         setSaveStatus('saved');
         addLogInternal('你', '保存草稿', `${components.length} 个组件`, result.savedAt);
         message.success(`草稿已保存（${components.length} 个组件）`);
