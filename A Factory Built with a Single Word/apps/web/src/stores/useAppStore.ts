@@ -4,46 +4,133 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 export interface UserInfo {
   id: string;
   name: string;
+  email: string;
+  department: string;
   avatar: string;
   role: 'admin' | 'operator' | 'viewer';
+  preferences?: {
+    theme: 'light' | 'dark';
+    defaultPage: string;
+    demoMode: boolean;
+    notifyAlert: boolean;
+    notifyTask: boolean;
+    notifySystem: boolean;
+  };
 }
 
 interface AppState {
-  user: UserInfo;
+  user: UserInfo | null;
   token: string | null;
+  remember: boolean;              // true=localStorage(跨进程) false=browser-close 丢失
+  preferencesByUserId: Record<string, NonNullable<UserInfo['preferences']>>;
   currentProjectId: string | null;
-  theme: 'light' | 'dark';
+  currentScenarioId: string | null;
+  currentSimulationId: string | null;
+  currentEvolutionId: string | null;
 
-  setUser: (u: UserInfo) => void;
-  setToken: (t: string | null) => void;
-  setCurrentProject: (id: string | null) => void;
+  login: (user: UserInfo, token: string, remember?: boolean) => void;
   logout: () => void;
+  setUser: (u: UserInfo) => void;
+
+  setProjectContext: (ctx: { projectId?: string; scenarioId?: string; simulationId?: string; evolutionId?: string }) => void;
+  clearProjectContext: () => void;
+  updatePreferences: (p: Partial<NonNullable<UserInfo['preferences']>>) => void;
 }
 
-const defaultUser: UserInfo = {
-  id: 'u-001',
-  name: 'Wanzheng',
-  avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Wanzheng',
-  role: 'admin',
+const defaultPreferences = {
+  theme: 'light' as const,
+  defaultPage: '/',
+  demoMode: false,
+  notifyAlert: true,
+  notifyTask: true,
+  notifySystem: true,
 };
 
 export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
-      user: defaultUser,
+      user: null,
       token: null,
+      remember: false,
+      preferencesByUserId: {},
       currentProjectId: null,
-      theme: 'light',
+      currentScenarioId: null,
+      currentSimulationId: null,
+      currentEvolutionId: null,
+
+      login: (user, token, remember = false) =>
+        set((state) => {
+          const preferences = {
+            ...defaultPreferences,
+            ...user.preferences,
+            ...state.preferencesByUserId[user.id],
+          };
+          return {
+            user: { ...user, preferences },
+            token,
+            remember,
+            preferencesByUserId: { ...state.preferencesByUserId, [user.id]: preferences },
+          };
+        }),
+
+      logout: () =>
+        set({
+          user: null,
+          token: null,
+          remember: false,
+          currentProjectId: null,
+          currentScenarioId: null,
+          currentSimulationId: null,
+          currentEvolutionId: null,
+        }),
 
       setUser: (u) => set({ user: u }),
-      setToken: (t) => set({ token: t }),
-      setCurrentProject: (id) => set({ currentProjectId: id }),
-      logout: () => set({ user: defaultUser, token: null, currentProjectId: null }),
+
+      setProjectContext: (ctx) =>
+        set((s) => ({
+          currentProjectId: ctx.projectId ?? s.currentProjectId,
+          currentScenarioId: ctx.scenarioId ?? s.currentScenarioId,
+          currentSimulationId: ctx.simulationId ?? s.currentSimulationId,
+          currentEvolutionId: ctx.evolutionId ?? s.currentEvolutionId,
+        })),
+
+      clearProjectContext: () =>
+        set({
+          currentProjectId: null,
+          currentScenarioId: null,
+          currentSimulationId: null,
+          currentEvolutionId: null,
+        }),
+
+      updatePreferences: (p) =>
+        set((s) => {
+          if (!s.user) return { user: null };
+          const preferences = { ...defaultPreferences, ...s.user.preferences, ...p };
+          return {
+            user: { ...s.user, preferences },
+            preferencesByUserId: { ...s.preferencesByUserId, [s.user.id]: preferences },
+          };
+        }),
     }),
     {
       name: 'ican-app',
       storage: createJSONStorage(() => localStorage),
-      partialize: (state) => ({ token: state.token, user: state.user, currentProjectId: state.currentProjectId }),
+      // remember=true → 跨进程保留；remember=false → 冷启动时通过 condition 丢弃
+      partialize: (state) => {
+        if (!state.remember) {
+          return { remember: false, user: null, token: null, preferencesByUserId: state.preferencesByUserId };
+        }
+        return {
+          user: state.user,
+          token: state.token,
+          remember: state.remember,
+          preferencesByUserId: state.preferencesByUserId,
+          currentProjectId: state.currentProjectId,
+          currentScenarioId: state.currentScenarioId,
+          currentSimulationId: state.currentSimulationId,
+          currentEvolutionId: state.currentEvolutionId,
+        };
+      },
     },
   ),
 );
