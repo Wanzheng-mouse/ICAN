@@ -12,9 +12,28 @@ export const GlobalStyle = createGlobalStyle`
     padding: 0;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
       'Hiragino Sans GB', 'Microsoft YaHei', Arial, sans-serif;
-    background: #f5f7fb;
-    color: #1f2937;
+    background: #f4f7fc;
+    color: #17213a;
+    letter-spacing: 0.01em;
   }
+
+  html[data-theme='dark'] body,
+  html[data-theme='dark'] #root {
+    background: #0c1428;
+    color: #e5edf9;
+  }
+  html[data-theme='dark'] .section-card,
+  html[data-theme='dark'] .notif-card {
+    background: #111a2f;
+    border-color: #2b3b5c;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
+  }
+  html[data-theme='dark'] .section-title,
+  html[data-theme='dark'] .search-title,
+  html[data-theme='dark'] .notif-title { color: #e5edf9; }
+  html[data-theme='dark'] .search-result-item { border-color: #22314d; }
+  html[data-theme='dark'] .search-result-item:hover,
+  html[data-theme='dark'] .notif-row:hover { background: #17233d; }
 
   * {
     box-sizing: border-box;
@@ -38,12 +57,13 @@ export const GlobalStyle = createGlobalStyle`
 
   /* AntD 卡片轻量化 */
   .ant-card {
-    border-radius: 10px !important;
-    border: 1px solid #eef0f4 !important;
-    box-shadow: 0 1px 2px rgba(11, 23, 51, 0.04) !important;
+    border-radius: 16px !important;
+    border: 1px solid rgba(220, 228, 240, 0.88) !important;
+    box-shadow: 0 10px 30px rgba(30, 52, 93, 0.055) !important;
+    overflow: hidden;
   }
   .ant-card-head {
-    border-bottom: 1px solid #eef0f4 !important;
+    border-bottom: 1px solid #edf1f7 !important;
     min-height: 48px !important;
     padding: 0 20px !important;
   }
@@ -97,15 +117,15 @@ export const GlobalStyle = createGlobalStyle`
 
   /* 页面通用 padding */
   .page-container {
-    padding: 20px 24px;
+    padding: 28px 32px 36px;
     min-height: calc(100vh - 60px);
   }
   .page-container-wide {
-    padding: 20px 32px;
+    padding: 28px 36px 36px;
     min-height: calc(100vh - 60px);
   }
   .page-container-narrow {
-    padding: 20px 24px;
+    padding: 28px 32px 36px;
     max-width: 1600px;
     margin: 0 auto;
   }
@@ -113,15 +133,16 @@ export const GlobalStyle = createGlobalStyle`
   /* 章节卡片 */
   .section-card {
     background: #fff;
-    border-radius: 12px;
-    border: 1px solid #eef0f4;
-    padding: 20px 24px;
-    margin-bottom: 16px;
+    border-radius: 16px;
+    border: 1px solid rgba(220, 228, 240, 0.9);
+    padding: 22px 24px;
+    margin-bottom: 18px;
+    box-shadow: 0 10px 30px rgba(30, 52, 93, 0.045);
   }
   .section-title {
     font-size: 16px;
     font-weight: 600;
-    color: #1f2937;
+    color: #17213a;
     margin: 0 0 16px;
     display: flex;
     align-items: center;
