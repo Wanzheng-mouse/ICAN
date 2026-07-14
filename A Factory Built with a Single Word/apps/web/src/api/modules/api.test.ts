@@ -30,6 +30,16 @@ describe('领域 API mock 模式', () => {
     expect(strategies.every((s) => s.category === 'strategy')).toBe(true);
   });
 
+  it('模板详情可直接应用并返回真实项目与场景关联', async () => {
+    const { applyTemplate, createProject, getTemplateById } = await import('@/api/modules');
+    const template = await getTemplateById('tpl-1');
+    expect(template?.data.components.length).toBeGreaterThan(0);
+
+    const project = await createProject({ name: 'Template project' });
+    const scenario = await applyTemplate('tpl-1', { project_id: project.id });
+    expect(scenario.project_id).toBe(project.id);
+    expect(scenario.data).toEqual(template?.data);
+  });
   it('getSimulation mock 返回运行信息', async () => {
     const { getSimulation } = await import('@/api/modules');
     const run = await getSimulation('mock');

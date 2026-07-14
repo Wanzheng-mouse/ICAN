@@ -17,6 +17,12 @@
 - 已接入真实后端：`/health`、`/api/health`、模板、项目与场景接口；模板与健康检查使用 `/api`，项目和场景使用 `/api/v1`。
 - 本周不提供认证、搜索、通知接口；前端继续以 Mock 实现这些模块，不能假设存在后端登录态或通知数据。
 - 场景请求的 `data` 固定包含 `components`、`canvas` 和 `schema_version: "1.0"`；模板时间字段为 `updatedAt`。
+## 第 2 周冻结范围
+
+- 项目响应严格使用 `ProjectRead`，默认状态为 `draft`，不再返回前端 DTO 中不存在的 `owner`。
+- 模板详情使用 `TemplateDetailRead`，其中 `data` 是可直接保存的 `ScenarioData`。
+- `POST /api/templates/{id}/apply`（兼容 `/api/v1/templates/{id}/apply`）会校验项目和场景模板，并创建持久化场景；返回的 `scenario.id` 可直接传给编辑器。
+- 首页创建/应用模板后必须同时保存并传递真实 `projectId` 与 `scenarioId`；编辑器刷新时按该 `scenarioId` 重新加载同一场景。
 ## 2. REST 接口
 
 ### 2.1 健康检查
@@ -33,12 +39,21 @@ GET  /api/templates?category=scene
 → [ TemplateRead, ... ]
 
 GET  /api/templates/{id}
-→ TemplateRead
+→ TemplateDetailRead
+
+POST /api/templates/{id}/apply
+兼容 POST /api/v1/templates/{id}/apply
+Body: { project_id: str, name?: str }
+→ ScenarioRead (201)
 
 TemplateRead {
   id: str, category: str, title: str, description: str,
   cover: str, industry: str, difficulty: str,
   downloads: int, views: int, updatedAt: str   // serialization_alias
+}
+
+TemplateDetailRead extends TemplateRead {
+  data: ScenarioData
 }
 ```
 
@@ -77,7 +92,13 @@ Body: { name?: str, data: dict }
 
 ScenarioRead {
   id: str, project_id: str, name: str,
-  data: dict, updated_at: datetime
+  data: ScenarioData, updated_at: datetime
+}
+
+ScenarioData {
+  components: list[SceneComponent],
+  canvas: { width: number, height: number, scale: number },
+  schema_version: "1.0"
 }
 ```
 
@@ -182,4 +203,4 @@ WS /api/v1/simulations/{id}/stream
 }
 ```
 
-HTTP 状态码：`422`（参数校验失败）、`404`（资源不存在）、`500`（服务器错误）。
+HTTP 状态码：`400`（模板类型不可应用）、`422`（参数校验失败）、`404`（资源不存在）、`500`（服务器错误）。

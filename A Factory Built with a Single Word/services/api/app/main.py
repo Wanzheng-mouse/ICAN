@@ -51,7 +51,7 @@ class Project(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     name: Mapped[str] = mapped_column(String(120), index=True)
     requirement: Mapped[str] = mapped_column(Text, default="")
-    status: Mapped[str] = mapped_column(String(32), default="active")
+    status: Mapped[str] = mapped_column(String(32), default="draft")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -120,7 +120,6 @@ class ProjectCreate(BaseModel):
 class ProjectRead(ProjectCreate):
     id: str
     status: str
-    owner: str = "demo-admin"
     created_at: datetime
     model_config = {"from_attributes": True}
 
@@ -146,11 +145,20 @@ class ScenarioCanvas(BaseModel):
 
 
 class ScenarioData(BaseModel):
-    """第 1 周冻结的场景 JSON 最小结构。"""
+    """前后端冻结的场景 JSON 最小结构。"""
 
     components: list[Any] = Field(default_factory=list)
     canvas: ScenarioCanvas = Field(default_factory=ScenarioCanvas)
     schema_version: Literal["1.0"] = "1.0"
+
+
+class TemplateDetailRead(TemplateRead):
+    data: ScenarioData = Field(validation_alias="scenario")
+
+
+class TemplateApplyCreate(BaseModel):
+    project_id: str
+    name: str | None = Field(default=None, min_length=1, max_length=120)
 
 
 class ScenarioCreate(BaseModel):
@@ -220,12 +228,44 @@ DEFAULT_TEMPLATES = [
     {"id": "tpl-4", "category": "report", "title": "医药合规报告模板", "description": "符合 GSP/GDP 要求的合规报告模板，自动生成关键指标与审计日志。", "cover": "report", "industry": "医药", "difficulty": "hard", "downloads": 1100, "views": 277, "updated_at": "2024-05-12", "scenario": {}},
 ]
 
+TEMPLATE_SCENARIOS: dict[str, dict[str, Any]] = {
+    "tpl-1": {
+        "schema_version": "1.0",
+        "canvas": {"width": 1200, "height": 800, "scale": 1},
+        "components": [
+            {"id": "shelf-a1", "type": "shelf", "name": "A 区货架 01", "x": 180, "y": 180, "width": 240, "height": 80, "rotation": 0, "properties": {"zone": "A", "capacity": 200}},
+            {"id": "shelf-a2", "type": "shelf", "name": "A 区货架 02", "x": 460, "y": 180, "width": 240, "height": 80, "rotation": 0, "properties": {"zone": "A", "capacity": 200}},
+            {"id": "station-pick-1", "type": "station", "name": "拣选工作站 01", "x": 260, "y": 90, "width": 100, "height": 50, "rotation": 0, "properties": {"station_type": "pick"}},
+            {"id": "charger-1", "type": "charger", "name": "充电桩 01", "x": 540, "y": 520, "width": 40, "height": 40, "rotation": 0, "properties": {}},
+            {"id": "agv-1", "type": "agv", "name": "AGV-001", "x": 420, "y": 360, "width": 32, "height": 24, "rotation": 0, "properties": {"battery": 90}},
+        ],
+    },
+    "tpl-2": {
+        "schema_version": "1.0",
+        "canvas": {"width": 1200, "height": 800, "scale": 1},
+        "components": [
+            {"id": "cold-shelf-1", "type": "shelf", "name": "冷藏区货架", "x": 160, "y": 180, "width": 240, "height": 80, "rotation": 0, "properties": {"zone": "cold", "temperature": "2-8°C"}},
+            {"id": "frozen-shelf-1", "type": "shelf", "name": "冷冻区货架", "x": 650, "y": 180, "width": 240, "height": 80, "rotation": 0, "properties": {"zone": "frozen", "temperature": "-18°C"}},
+            {"id": "cold-station-1", "type": "station", "name": "冷链复核台", "x": 470, "y": 90, "width": 110, "height": 50, "rotation": 0, "properties": {"station_type": "inspect"}},
+            {"id": "cold-charger-1", "type": "charger", "name": "低温充电桩", "x": 540, "y": 520, "width": 40, "height": 40, "rotation": 0, "properties": {"temperature_protected": True}},
+            {"id": "cold-agv-1", "type": "agv", "name": "冷链 AGV-001", "x": 500, "y": 360, "width": 32, "height": 24, "rotation": 0, "properties": {"battery": 88, "temperature_protected": True}},
+        ],
+    },
+}
+
+for default_template in DEFAULT_TEMPLATES:
+    default_template["scenario"] = deepcopy(TEMPLATE_SCENARIOS.get(default_template["id"], {}))
+
 
 def seed_templates(db: Session) -> None:
-    """Insert the Week 1 templates once, without replacing user-managed records."""
-    for template in DEFAULT_TEMPLATES:
-        if db.get(Template, template["id"]) is None:
-            db.add(Template(**template))
+    """Insert or refresh built-in templates while preserving other records."""
+    for template_data in DEFAULT_TEMPLATES:
+        template = db.get(Template, template_data["id"])
+        if template is None:
+            db.add(Template(**deepcopy(template_data)))
+            continue
+        for field_name, value in template_data.items():
+            setattr(template, field_name, deepcopy(value))
     db.commit()
 
 
@@ -317,7 +357,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="ICAN Unmanned Warehouse API",
     version="0.1.0",
-    description="第 1 周后端契约：提供健康检查、模板、项目与场景接口；认证、搜索和通知仍由前端 Mock 提供。",
+    description="第 2 周后端契约：提供项目、模板详情与应用、场景持久化，并保证前端编辑器使用真实场景 ID。",
     lifespan=lifespan,
 )
 app.add_middleware(
@@ -345,10 +385,27 @@ def list_templates(category: str | None = None, db: Session = Depends(get_db)) -
         query = query.filter(Template.category == category)
     return list(query.order_by(Template.id).all())
 
-@app.get("/api/templates/{template_id}", response_model=TemplateRead, tags=["templates"], summary="Get template detail")
-@app.get(f"{PREFIX}/templates/{{template_id}}", response_model=TemplateRead, tags=["templates"], summary="Get template detail")
+@app.get("/api/templates/{template_id}", response_model=TemplateDetailRead, tags=["templates"], summary="Get template detail")
+@app.get(f"{PREFIX}/templates/{{template_id}}", response_model=TemplateDetailRead, tags=["templates"], summary="Get template detail")
 def get_template(template_id: str, db: Session = Depends(get_db)) -> Template:
     return get_or_404(Template, template_id, db, "Template")
+
+
+@app.post("/api/templates/{template_id}/apply", response_model=ScenarioRead, status_code=status.HTTP_201_CREATED, tags=["templates"])
+@app.post(f"{PREFIX}/templates/{{template_id}}/apply", response_model=ScenarioRead, status_code=status.HTTP_201_CREATED, tags=["templates"])
+def apply_template(template_id: str, payload: TemplateApplyCreate, db: Session = Depends(get_db)) -> Scenario:
+    template = get_or_404(Template, template_id, db, "Template")
+    get_or_404(Project, payload.project_id, db, "Project")
+    if template.category != "scene":
+        raise HTTPException(status_code=400, detail="Only scene templates can be applied")
+
+    data = ScenarioData.model_validate(deepcopy(template.scenario)).model_dump()
+    scenario = Scenario(project_id=payload.project_id, name=payload.name or template.title, data=data)
+    db.add(scenario)
+    db.commit()
+    db.refresh(scenario)
+    return scenario
+
 
 @app.post(f"{PREFIX}/projects", response_model=ProjectRead, status_code=status.HTTP_201_CREATED)
 def create_project(payload: ProjectCreate, db: Session = Depends(get_db)) -> Project:

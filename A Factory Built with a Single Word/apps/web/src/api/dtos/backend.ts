@@ -5,6 +5,8 @@
  * 2026-07-14 与 main.py 逐字段对齐。
  */
 
+import type { SceneComponent } from '@ican/contracts';
+
 // ===== Project =====
 export interface ProjectRead {
   id: string;
@@ -33,24 +35,39 @@ export interface TemplateRead {
   updatedAt: string;       // serialization_alias
 }
 
+export interface ScenarioData {
+  components: SceneComponent[];
+  canvas: { width: number; height: number; scale: number };
+  schema_version: string;
+}
+
+export interface TemplateDetailRead extends TemplateRead {
+  data: ScenarioData;
+}
+
+export interface TemplateApplyCreate {
+  project_id: string;
+  name?: string;
+}
+
 // ===== Scenario =====
 export interface ScenarioRead {
   id: string;
   project_id: string;
   name: string;
-  data: Record<string, unknown>;
+  data: ScenarioData;
   updated_at: string;
 }
 
 export interface ScenarioCreate {
   project_id: string;
   name: string;
-  data?: Record<string, unknown>;
+  data?: ScenarioData;
 }
 
 export interface ScenarioUpdate {
   name?: string;
-  data: Record<string, unknown>;
+  data: ScenarioData;
 }
 
 // ===== Simulation =====

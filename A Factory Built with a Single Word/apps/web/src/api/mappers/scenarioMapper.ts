@@ -27,7 +27,7 @@ export function editorComponentsToScenarioUpdate(
 ): ScenarioUpdate {
   return {
     data: {
-      components: components as unknown[],
+      components,
       canvas: canvas ?? { width: 1200, height: 800, scale: 1 },
       schema_version: '1.0',
     },
@@ -45,7 +45,7 @@ export function editorComponentsToScenarioCreate(
     project_id: projectId,
     name,
     data: {
-      components: components as unknown[],
+      components,
       canvas: canvas ?? { width: 1200, height: 800, scale: 1 },
       schema_version: '1.0',
     },

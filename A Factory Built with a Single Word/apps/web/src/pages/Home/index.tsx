@@ -17,7 +17,7 @@ import {
 } from '@ant-design/icons';
 import { App, Button, Input, Progress, Skeleton, Space, Steps, Tag, Tooltip, Upload, type UploadProps } from 'antd';
 import { useNavigate } from 'react-router-dom';
-import { homeStaticData, useTemplates, createProject, createScenario } from '@/api/modules';
+import { homeStaticData, useTemplates, createProject, createScenario, getTemplateById, applyTemplate } from '@/api/modules';
 import { useAppStore } from '@/stores/useAppStore';
 import { HeroIllustration } from '@/components';
 import { heroBanner, requirementPlaceholder } from '@ican/mock-data';
@@ -130,23 +130,26 @@ export default function Home() {
     message.info('已填入示例需求');
   };
 
-  const handleTemplateAction = async (tplTitle: string, action: 'preview' | 'use' | 'quick') => {
-    if (action === 'preview') {
-      message.info(`正在预览「${tplTitle}」场景模板`);
-      return;
-    }
+  const handleTemplateAction = async (templateId: string, tplTitle: string, action: 'preview' | 'use' | 'quick') => {
     try {
+      if (action === 'preview') {
+        const detail = await getTemplateById(templateId);
+        if (!detail) throw new Error('模板不存在或已下架');
+        message.info(`「${tplTitle}」包含 ${detail.data.components.length} 个场景组件`);
+        return;
+      }
+
+      const projectName = action === 'quick' ? `快速体验-${tplTitle}` : tplTitle;
+      const proj = await createProject({ name: projectName, requirement: `${action === 'quick' ? '快速体验' : '使用模板'} ${tplTitle}` });
+      const scn = await applyTemplate(templateId, { project_id: proj.id, name: `${tplTitle}场景` });
+      setProjectContext({ projectId: proj.id, scenarioId: scn.id });
+
       if (action === 'use') {
-        const proj = await createProject({ name: tplTitle, requirement: `使用模板 ${tplTitle}` });
-        const scn = await createScenario({ project_id: proj.id, name: `${tplTitle}场景`, data: { components: [], canvas: { width: 1200, height: 800, scale: 1 }, schema_version: '1.0' } });
-        setProjectContext({ projectId: proj.id, scenarioId: scn.id });
-        message.success(`已创建项目「${tplTitle}」，跳转编辑器`);
+        message.success(`已从「${tplTitle}」创建场景，跳转编辑器`);
         setTimeout(() => navigate(`/editor?projectId=${proj.id}&scenarioId=${scn.id}`), 600);
-      } else if (action === 'quick') {
-        const proj = await createProject({ name: `快速体验-${tplTitle}`, requirement: `快速体验 ${tplTitle}` });
-        setProjectContext({ projectId: proj.id });
-        message.success('快速体验模式已启动');
-        setTimeout(() => navigate('/simulation'), 800);
+      } else {
+        message.success('快速体验场景已创建');
+        setTimeout(() => navigate(`/simulation?projectId=${proj.id}&scenarioId=${scn.id}`), 800);
       }
     } catch (err: unknown) {
       message.error(err instanceof Error ? err.message : '操作失败，请稍后重试');
@@ -266,7 +269,7 @@ export default function Home() {
               <a className="more-link" onClick={() => navigate('/resource')}>查看更多模板 →</a>
             </div>
             <div className="template-grid">
-              {templatesLoading ? <Skeleton active style={{ gridColumn: '1 / -1' }} /> : cards.map((tpl) => (
+              {templatesLoading ? <Skeleton active style={{ gridColumn: '1 / -1' }} /> : cards.map((tpl, index) => (
                 <div key={tpl.title} className="template-card-item">
                   <HeroIllustration variant={tpl.cover as 'ecom' | 'coldchain' | '3c' | 'medical'} height={110} />
                   <div className="template-card-body">
@@ -275,13 +278,13 @@ export default function Home() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
                       <Tag color="blue" className="template-tag">{'tag' in tpl ? (tpl as { tag: string }).tag : '快速体验'}</Tag>
                       <Space size={4}>
-                        <Button size="small" type="text" icon={<EyeOutlined />} onClick={() => handleTemplateAction(tpl.title, 'preview')} />
-                        <Button size="small" type="primary" onClick={() => handleTemplateAction(tpl.title, 'use')}>
+                        <Button size="small" type="text" icon={<EyeOutlined />} onClick={() => handleTemplateAction('id' in tpl ? tpl.id : `tpl-${index + 1}`, tpl.title, 'preview')} />
+                        <Button size="small" type="primary" onClick={() => handleTemplateAction('id' in tpl ? tpl.id : `tpl-${index + 1}`, tpl.title, 'use')}>
                           使用模板
                         </Button>
                       </Space>
                     </div>
-                    <Button block size="small" type="dashed" icon={<PlayCircleOutlined />} style={{ marginTop: 6 }} onClick={() => handleTemplateAction(tpl.title, 'quick')}>
+                    <Button block size="small" type="dashed" icon={<PlayCircleOutlined />} style={{ marginTop: 6 }} onClick={() => handleTemplateAction('id' in tpl ? tpl.id : `tpl-${index + 1}`, tpl.title, 'quick')}>
                       快速体验
                     </Button>
                   </div>

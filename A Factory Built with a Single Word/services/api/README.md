@@ -21,7 +21,8 @@
 已实现的接口：
 - GET /health（兼容 GET /api/health、GET /api/v1/health）
 - POST、GET /api/v1/projects，GET /api/v1/projects/{id}
-- GET /api/templates、GET /api/templates/{id}（兼容 /api/v1/templates），模板在服务启动时自动写入 SQLite
+- GET /api/templates、GET /api/templates/{id}（兼容 /api/v1/templates），详情包含可保存的场景 data
+- POST /api/templates/{id}/apply（兼容 /api/v1/templates/{id}/apply），将场景模板应用到指定项目并持久化 Scenario
 - POST、GET、PUT /api/v1/scenarios
 - POST、GET /api/v1/simulations，仿真控制、异常注入和 WebSocket 实时流
 - POST、GET /api/v1/evolutions

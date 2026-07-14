@@ -18,11 +18,12 @@ import {
   templateCards as mockCards,
   featureItems as mockFeatures,
   generationSteps as mockSteps,
+  editorSceneComponents as mockComponents,
   uploadItems as mockUploadItems,
 } from '@ican/mock-data';
 
 import type { FeatureItem, GenerationStep, SceneTemplate, TemplateCard, UploadItem } from '@ican/contracts';
-import type { ProjectCreate, ProjectRead } from '@/api/dtos/backend';
+import type { ProjectCreate, ProjectRead, ScenarioRead, TemplateApplyCreate, TemplateDetailRead } from '@/api/dtos/backend';
 
 // ===== 纯数据函数 =====
 
@@ -31,9 +32,25 @@ export async function getTemplates(category?: string): Promise<SceneTemplate[]> 
   return request({ url: apiUrl('/templates'), params: category ? { category } : {} });
 }
 
-export async function getTemplateById(id: string): Promise<SceneTemplate | null> {
-  if (USE_MOCK) return mockTemplates.find((t) => t.id === id) ?? null;
+export async function getTemplateById(id: string): Promise<TemplateDetailRead | null> {
+  if (USE_MOCK) {
+    const template = mockTemplates.find((t) => t.id === id);
+    if (!template) return null;
+    return {
+      ...template,
+      data: { components: mockComponents, canvas: { width: 1200, height: 800, scale: 1 }, schema_version: '1.0' },
+    };
+  }
   return request({ url: apiUrl(`/templates/${id}`) });
+}
+
+export async function applyTemplate(id: string, params: TemplateApplyCreate): Promise<ScenarioRead> {
+  if (USE_MOCK) {
+    const template = await getTemplateById(id);
+    if (!template || template.category !== 'scene') throw new Error('该模板不能应用为场景');
+    return { id: `scn-${Date.now()}`, project_id: params.project_id, name: params.name ?? template.title, data: template.data, updated_at: new Date().toISOString() };
+  }
+  return request({ url: apiUrl(`/templates/${id}/apply`), method: 'POST', data: params });
 }
 
 export async function createProject(params: ProjectCreate): Promise<ProjectRead> {

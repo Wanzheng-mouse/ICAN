@@ -16,10 +16,11 @@ import {
   ZoomOutOutlined,
 } from '@ant-design/icons';
 import { App, Button, Dropdown, Input, InputNumber, Modal, Select, Tabs, Tag } from 'antd';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { SectionCard } from '@/components';
 import type { SceneComponent } from '@ican/contracts';
 import { useScenario, useSaveScenario } from '@/api/modules';
+import { useAppStore } from '@/stores/useAppStore';
 import {
   editorComponentLibrary,
   editorOperationLogs,
@@ -65,16 +66,21 @@ const initialComponents: SceneComponent[] = [
   { id: 'agv-2', type: 'agv', name: 'AGV-002', x: 620, y: 400, width: 24, height: 16, rotation: 0, properties: { battery: 62 } },
 ];
 
-const SCENARIO_ID = 'scn-ecom-001';
 const HISTORY_LIMIT = 30;
 
 export default function Editor() {
   const { message } = App.useApp();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const storedProjectId = useAppStore((state) => state.currentProjectId);
+  const storedScenarioId = useAppStore((state) => state.currentScenarioId);
+  const setProjectContext = useAppStore((state) => state.setProjectContext);
+  const projectId = searchParams.get('projectId') ?? storedProjectId;
+  const scenarioId = searchParams.get('scenarioId') ?? storedScenarioId;
 
   // ===== 领域 API 接入 =====
-  const { data: serverData, isLoading: _isLoading } = useScenario(SCENARIO_ID);
-  const saveMutation = useSaveScenario(SCENARIO_ID);
+  const { data: serverData, isLoading, isError } = useScenario(scenarioId ?? '');
+  const saveMutation = useSaveScenario(scenarioId ?? '');
 
   const [components, setComponents] = useState<SceneComponent[]>(initialComponents);
   // 历史栈：past 是可 undo 的快照，future 是可 redo 的快照
@@ -86,6 +92,22 @@ export default function Editor() {
   const [zoom, setZoom] = useState(100);
   const [logs, setLogs] = useState(editorOperationLogs);
   const lastLoadedAtRef = useRef<number>(0);
+
+  useEffect(() => {
+    if (projectId || scenarioId) {
+      setProjectContext({ projectId: projectId ?? undefined, scenarioId: scenarioId ?? undefined });
+    }
+  }, [projectId, scenarioId, setProjectContext]);
+
+  useEffect(() => {
+    if (!serverData) return;
+    setComponents(serverData);
+    setSelectedId(serverData[0]?.id ?? null);
+    setPast([]);
+    setFuture([]);
+    setSaveStatus('saved');
+    lastLoadedAtRef.current = Date.now();
+  }, [serverData]);
 
   const selected = components.find((c) => c.id === selectedId) ?? null;
 
@@ -240,6 +262,10 @@ export default function Editor() {
   };
 
   const handleSave = () => {
+    if (!scenarioId) {
+      message.warning('缺少场景 ID，请从首页创建或应用模板后再保存');
+      return;
+    }
     setSaveStatus('saving');
     saveMutation.mutate(components, {
       onSuccess: (result: { savedAt: string }) => {
@@ -255,6 +281,14 @@ export default function Editor() {
   };
 
   const handleReload = () => {
+    if (!scenarioId) {
+      message.warning('缺少场景 ID，无法从服务器重新加载');
+      return;
+    }
+    if (isError) {
+      message.error('场景加载失败，请检查后端服务后重试');
+      return;
+    }
     if (saveStatus === 'dirty') {
       Modal.confirm({
         title: '放弃未保存的修改？',
@@ -277,6 +311,8 @@ export default function Editor() {
       setFuture([]);
       addLogInternal('系统', '从服务器重新加载');
       message.success('已从服务器重新加载');
+    } else {
+      message.info(isLoading ? '场景仍在加载中' : '服务器没有可加载的场景数据');
     }
   };
 
@@ -299,7 +335,7 @@ export default function Editor() {
       return;
     }
     message.success('正在进入仿真...');
-    setTimeout(() => navigate('/simulation'), 600);
+    setTimeout(() => navigate(`/simulation?projectId=${projectId ?? ''}&scenarioId=${scenarioId ?? ''}`), 600);
   };
 
   const handleAddComponent = (category: string, name: string) => {
@@ -352,6 +388,9 @@ export default function Editor() {
               {saveStatus === 'saved' ? '已保存' : saveStatus === 'saving' ? '保存中...' : '未保存'}
             </Tag>
             {selected && <Tag color="blue" className="save-tag">已选中: {selected.name}</Tag>}
+            {!scenarioId && <Tag color="warning" className="save-tag">未绑定场景</Tag>}
+            {isLoading && <Tag color="processing" className="save-tag">正在加载场景</Tag>}
+            {isError && <Tag color="error" className="save-tag">场景加载失败</Tag>}
           </h1>
         </div>
         <div className="editor-header-right">
