@@ -2,14 +2,8 @@ import { useState } from 'react';
 import { Button, Checkbox, Form, Input, Typography, message } from 'antd';
 import {
   ArrowRightOutlined,
-  ApiOutlined,
   AppstoreFilled,
-  CheckCircleFilled,
-  DeploymentUnitOutlined,
   LockOutlined,
-  RadarChartOutlined,
-  SafetyCertificateFilled,
-  ThunderboltOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -18,42 +12,6 @@ import { DEMO_ACCOUNT_HINT, mockLogin } from '@/api/modules';
 import './Login.css';
 
 const { Text, Title } = Typography;
-
-function DigitalTwinBoard() {
-  return (
-    <div className="twin-board" aria-hidden="true">
-      <div className="twin-board-header">
-        <div><span className="live-dot" /> LIVE DIGITAL TWIN</div>
-        <span>SCENE / WH-A01</span>
-      </div>
-      <div className="twin-board-body">
-        <div className="twin-map">
-          <div className="map-label map-label-a">STORAGE A</div>
-          <div className="map-label map-label-b">PICKING</div>
-          <div className="rack-zone rack-zone-a">{Array.from({ length: 8 }, (_, i) => <i key={i} />)}</div>
-          <div className="rack-zone rack-zone-b">{Array.from({ length: 6 }, (_, i) => <i key={i} />)}</div>
-          <div className="sort-zone"><span /><span /><span /></div>
-          <div className="route route-a" /><div className="route route-b" /><div className="route route-c" />
-          <div className="agv-dot agv-dot-a"><b>07</b></div>
-          <div className="agv-dot agv-dot-b"><b>12</b></div>
-          <div className="agv-dot agv-dot-c"><b>18</b></div>
-          <div className="map-pulse pulse-a" /><div className="map-pulse pulse-b" />
-        </div>
-        <div className="twin-feed">
-          <div className="feed-title">智能体状态 <span>6 ONLINE</span></div>
-          <div className="feed-item"><DeploymentUnitOutlined /><div><b>调度智能体</b><span>任务分配中</span></div><em>RUN</em></div>
-          <div className="feed-item"><RadarChartOutlined /><div><b>导航智能体</b><span>路径计算完成</span></div><em>OK</em></div>
-          <div className="feed-item"><ApiOutlined /><div><b>设备智能体</b><span>设备运行正常</span></div><em>OK</em></div>
-        </div>
-      </div>
-      <div className="twin-kpis">
-        <div><ThunderboltOutlined /><span>系统吞吐</span><strong>1,284<small> 件/h</small></strong></div>
-        <div><RadarChartOutlined /><span>任务完成率</span><strong>98.6<small>%</small></strong></div>
-        <div><CheckCircleFilled /><span>在线设备</span><strong>126<small> / 128</small></strong></div>
-      </div>
-    </div>
-  );
-}
 
 export default function LoginPage() {
   const [loading, setLoading] = useState(false);
@@ -88,17 +46,28 @@ export default function LoginPage() {
           <div className="auth-brand"><span className="auth-brand-icon"><AppstoreFilled /></span><b>一言造厂</b></div>
           <div className="auth-environment"><span /> SIMULATION ONLINE</div>
         </div>
-        <div className="auth-showcase-content">
-          <span className="auth-eyebrow">DU MATE / AUTONOMOUS WAREHOUSE</span>
-          <h1>让仓储决策<br /><em>先在数字世界发生</em></h1>
-          <p>从一句需求到可验证的无人仓方案，完成建模、仿真、进化与决策闭环。</p>
+        <div className="auth-creative-field" aria-hidden="true">
+          <div className="creative-halo creative-halo-one" />
+          <div className="creative-halo creative-halo-two" />
+          <div className="creative-halo creative-halo-three" />
+          <div className="creative-beam creative-beam-one" />
+          <div className="creative-beam creative-beam-two" />
+          <div className="creative-node creative-node-one"><i /></div>
+          <div className="creative-node creative-node-two"><i /></div>
+          <div className="creative-node creative-node-three"><i /></div>
+          <div className="creative-node creative-node-four"><i /></div>
+          <div className="creative-corner creative-corner-left" />
+          <div className="creative-corner creative-corner-right" />
+          <div className="creative-dots creative-dots-left" />
+          <div className="creative-dots creative-dots-right" />
+          <div className="creative-axis-label creative-axis-label-left">DU / 01</div>
+          <div className="creative-axis-label creative-axis-label-right">WAREHOUSE INTELLIGENCE</div>
         </div>
-        <DigitalTwinBoard />
-        <div className="auth-status"><SafetyCertificateFilled /> 本地演示环境安全运行</div>
       </section>
 
       <section className="auth-panel">
         <div className="auth-form-wrap">
+          <div className="auth-login-mark"><AppstoreFilled /></div>
           <span className="auth-kicker">SECURE ACCESS</span>
           <Title level={2}>欢迎回来</Title>
           <Text type="secondary">登录一言造厂，继续你的无人仓决策项目</Text>

@@ -7,6 +7,7 @@ import { RequireAuth } from '@/components/RequireAuth';
 
 const Login = lazy(() => import('@/pages/Login'));
 const Register = lazy(() => import('@/pages/Login/Register'));
+const ForgotPassword = lazy(() => import('@/pages/ForgotPassword'));
 const Home = lazy(() => import('@/pages/Home'));
 const Simulation = lazy(() => import('@/pages/Simulation'));
 const Evolution = lazy(() => import('@/pages/Evolution'));
@@ -38,12 +39,7 @@ export function AppRoutes() {
         {/* 公开路由 */}
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
-        <Route path="/forgot-password" element={
-          <div style={{ textAlign: 'center', paddingTop: 80 }}>
-            <h2>忘记密码</h2>
-            <p style={{ color: '#6b7280' }}>请联系管理员重置密码（演示）</p>
-          </div>
-        } />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
 
         {/* 首页（需登录） */}
         <Route path="/" element={<RequireAuth><MainLayout><Home /></MainLayout></RequireAuth>} />
