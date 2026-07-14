@@ -12,6 +12,11 @@
 - 数据格式: JSON
 - 时间格式: ISO 8601 字符串 (`datetime.isoformat()`)
 
+## 第 1 周冻结范围
+
+- 已接入真实后端：`/health`、`/api/health`、模板、项目与场景接口；模板与健康检查使用 `/api`，项目和场景使用 `/api/v1`。
+- 本周不提供认证、搜索、通知接口；前端继续以 Mock 实现这些模块，不能假设存在后端登录态或通知数据。
+- 场景请求的 `data` 固定包含 `components`、`canvas` 和 `schema_version: "1.0"`；模板时间字段为 `updatedAt`。
 ## 2. REST 接口
 
 ### 2.1 健康检查
