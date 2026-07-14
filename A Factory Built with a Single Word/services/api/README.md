@@ -10,7 +10,7 @@
 5. Copy-Item .env.example .env
 6. uvicorn app.main:app --reload --port 8000
 
-启动后可访问 `/health`、`/api/templates?category=scene` 和 `/docs`（Swagger 可交互接口文档）。
+启动后可访问 `/health`（兼容 `/api/health`）、`/api/templates?category=scene` 和 `/docs`（Swagger 可交互接口文档）。
 
 工程分层：
 - app.main：API、数据层、场景、仿真、优化和报告的 MVP 实现
@@ -19,9 +19,9 @@
 - SQLite：项目、场景、仿真运行和优化结果持久化
 
 已实现的接口：
-- GET /health（兼容 GET /api/v1/health）
-- POST 和 GET /api/v1/projects
-- GET /api/templates（兼容 GET /api/v1/templates），模板在服务启动时自动写入 SQLite
+- GET /health（兼容 GET /api/health、GET /api/v1/health）
+- POST、GET /api/v1/projects，GET /api/v1/projects/{id}
+- GET /api/templates、GET /api/templates/{id}（兼容 /api/v1/templates），模板在服务启动时自动写入 SQLite
 - POST、GET、PUT /api/v1/scenarios
 - POST、GET /api/v1/simulations，仿真控制、异常注入和 WebSocket 实时流
 - POST、GET /api/v1/evolutions

@@ -51,7 +51,7 @@ class Project(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     name: Mapped[str] = mapped_column(String(120), index=True)
     requirement: Mapped[str] = mapped_column(Text, default="")
-    status: Mapped[str] = mapped_column(String(32), default="draft")
+    status: Mapped[str] = mapped_column(String(32), default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -120,6 +120,7 @@ class ProjectCreate(BaseModel):
 class ProjectRead(ProjectCreate):
     id: str
     status: str
+    owner: str = "demo-admin"
     created_at: datetime
     model_config = {"from_attributes": True}
 
@@ -138,10 +139,24 @@ class TemplateRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ScenarioCanvas(BaseModel):
+    width: int = Field(default=1200, gt=0)
+    height: int = Field(default=800, gt=0)
+    scale: float = Field(default=1, gt=0)
+
+
+class ScenarioData(BaseModel):
+    """第 1 周冻结的场景 JSON 最小结构。"""
+
+    components: list[Any] = Field(default_factory=list)
+    canvas: ScenarioCanvas = Field(default_factory=ScenarioCanvas)
+    schema_version: Literal["1.0"] = "1.0"
+
+
 class ScenarioCreate(BaseModel):
     project_id: str
     name: str = Field(min_length=1, max_length=120)
-    data: dict[str, Any] = Field(default_factory=dict)
+    data: ScenarioData = Field(default_factory=ScenarioData)
 
 
 class ScenarioRead(ScenarioCreate):
@@ -152,7 +167,7 @@ class ScenarioRead(ScenarioCreate):
 
 class ScenarioUpdate(BaseModel):
     name: str | None = None
-    data: dict[str, Any]
+    data: ScenarioData
 
 
 class SimulationCreate(BaseModel):
@@ -299,7 +314,12 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="ICAN Unmanned Warehouse API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(
+    title="ICAN Unmanned Warehouse API",
+    version="0.1.0",
+    description="第 1 周后端契约：提供健康检查、模板、项目与场景接口；认证、搜索和通知仍由前端 Mock 提供。",
+    lifespan=lifespan,
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.origin_list,
@@ -311,6 +331,7 @@ PREFIX = "/api/v1"
 
 
 @app.get("/health", tags=["system"], summary="Check API health")
+@app.get("/api/health", tags=["system"], summary="Check API health")
 @app.get(f"{PREFIX}/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "service": "ican-api"}
@@ -324,6 +345,10 @@ def list_templates(category: str | None = None, db: Session = Depends(get_db)) -
         query = query.filter(Template.category == category)
     return list(query.order_by(Template.id).all())
 
+@app.get("/api/templates/{template_id}", response_model=TemplateRead, tags=["templates"], summary="Get template detail")
+@app.get(f"{PREFIX}/templates/{{template_id}}", response_model=TemplateRead, tags=["templates"], summary="Get template detail")
+def get_template(template_id: str, db: Session = Depends(get_db)) -> Template:
+    return get_or_404(Template, template_id, db, "Template")
 
 @app.post(f"{PREFIX}/projects", response_model=ProjectRead, status_code=status.HTTP_201_CREATED)
 def create_project(payload: ProjectCreate, db: Session = Depends(get_db)) -> Project:
@@ -339,6 +364,9 @@ def list_projects(db: Session = Depends(get_db)) -> list[Project]:
     return list(db.query(Project).order_by(Project.created_at.desc()).all())
 
 
+@app.get(f"{PREFIX}/projects/{{project_id}}", response_model=ProjectRead)
+def get_project(project_id: str, db: Session = Depends(get_db)) -> Project:
+    return get_or_404(Project, project_id, db, "Project")
 @app.post(f"{PREFIX}/scenarios", response_model=ScenarioRead, status_code=status.HTTP_201_CREATED)
 def create_scenario(payload: ScenarioCreate, db: Session = Depends(get_db)) -> Scenario:
     get_or_404(Project, payload.project_id, db, "Project")
@@ -359,7 +387,7 @@ def update_scenario(scenario_id: str, payload: ScenarioUpdate, db: Session = Dep
     scenario = get_or_404(Scenario, scenario_id, db, "Scenario")
     if payload.name is not None:
         scenario.name = payload.name
-    scenario.data = payload.data
+    scenario.data = payload.data.model_dump()
     db.commit()
     db.refresh(scenario)
     return scenario

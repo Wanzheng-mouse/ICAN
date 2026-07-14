@@ -25,6 +25,7 @@ export interface ScenarioRead {
   project_id: string;
   name: string;
   data: Record<string, unknown>;  // 嵌套 JSON
+  updated_at: string;
 }
 
 export interface ScenarioData {
@@ -40,6 +41,7 @@ export interface ScenarioCreate {
 }
 
 export interface ScenarioUpdate {
+  name?: string;
   data: ScenarioData;
 }
 
