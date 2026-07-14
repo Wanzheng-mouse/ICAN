@@ -12,11 +12,11 @@ import { apiUrl } from '@/utils/apiUrl';
 import { consoleAgents as mockAgents, consoleEvents as mockEvents, consoleRun as mockRun } from '@ican/mock-data';
 
 import type { Agent, SimulationEvent, SimulationRun } from '@ican/contracts';
-import type { SimulationCreate, SimulationControl, AnomalyInject, SimulationRead } from '@/api/dtos/backend';
+import type { SimulationCreate, SimulationControl, AnomalyCreate, SimulationRead } from '@/api/dtos/backend';
 import { simulationReadToRun } from '@/api/mappers/simulationMapper';
 
 export async function createSimulation(params: SimulationCreate): Promise<SimulationRead> {
-  if (USE_MOCK) return { id: `sim-${Date.now()}`, project_id: params.project_id, scenario_id: params.scenario_id, status: 'created', metrics: null, config: { robot_count: params.robot_count ?? 10, order_count: params.order_count ?? 20, speed: 1 }, events: [], created_at: new Date().toISOString() };
+  if (USE_MOCK) return { id: `sim-${Date.now()}`, project_id: params.project_id, scenario_id: params.scenario_id, status: 'created', config: { robot_count: params.robot_count ?? 10, order_count: params.order_count ?? 20 }, metrics: { completion_rate: 0, average_duration: 0, congestion_count: 0, energy: 0 }, events: [], created_at: new Date().toISOString() };
   return request({ url: apiUrl('/simulations'), method: 'POST', data: params });
 }
 
@@ -33,7 +33,7 @@ export async function controlSimulation(simulationId: string, action: Simulation
 
 export async function injectAnomaly(simulationId: string, type: string): Promise<void> {
   if (USE_MOCK) return;
-  return request({ url: apiUrl(`/simulations/${simulationId}/anomalies`), method: 'POST', data: { type } as AnomalyInject });
+  return request({ url: apiUrl(`/simulations/${simulationId}/anomalies`), method: 'POST', data: { type } as AnomalyCreate });
 }
 
 export async function getSimulationAgents(simulationId: string): Promise<Agent[]> {

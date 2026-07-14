@@ -18,7 +18,7 @@ import type { EvolutionRead, EvolutionCreate } from '@/api/dtos/backend';
 export type EvolutionTrendPoint = any;
 
 export async function createEvolution(params: EvolutionCreate): Promise<EvolutionRead> {
-  if (USE_MOCK) return { id: `ev-${Date.now()}`, simulation_id: params.simulation_id, diagnosis: [], baseline_metrics: { completion_rate: 0, average_duration: 0, congestion_count: 0 }, optimized_metrics: { completion_rate: 0, average_duration: 0, congestion_count: 0 }, created_at: new Date().toISOString() };
+  if (USE_MOCK) return { id: `ev-${Date.now()}`, simulation_id: params.simulation_id, diagnosis: [], baseline_metrics: {}, optimized_metrics: {}, created_at: new Date().toISOString() };
   return request({ url: apiUrl('/evolutions'), method: 'POST', data: params });
 }
 

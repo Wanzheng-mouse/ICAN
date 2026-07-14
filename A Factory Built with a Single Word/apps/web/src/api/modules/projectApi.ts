@@ -37,7 +37,7 @@ export async function getTemplateById(id: string): Promise<SceneTemplate | null>
 }
 
 export async function createProject(params: ProjectCreate): Promise<ProjectRead> {
-  if (USE_MOCK) return { id: `proj-${Date.now()}`, name: params.name, requirement: params.requirement ?? '', status: 'active', owner: '', created_at: new Date().toISOString() };
+  if (USE_MOCK) return { id: `proj-${Date.now()}`, name: params.name, requirement: params.requirement ?? '', status: 'draft', created_at: new Date().toISOString() };
   return request({ url: apiUrl('/projects'), method: 'POST', data: params });
 }
 

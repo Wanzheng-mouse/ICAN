@@ -12,9 +12,9 @@ export function evolutionReadToReport(read: EvolutionRead): EvolutionReport {
     goal: '—',
     metrics: [],
     issues: (read.diagnosis ?? []).map((d) => ({
-      level: d.level,
-      title: d.title,
-      description: d.description,
+      level: d.type === 'congestion' ? 'high' : d.type === 'energy' ? 'medium' : 'low',
+      title: d.type,
+      description: d.message,
       foundIn: read.created_at,
     })),
     actions: [],
