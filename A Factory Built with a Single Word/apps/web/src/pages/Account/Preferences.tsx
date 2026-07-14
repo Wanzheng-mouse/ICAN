@@ -1,4 +1,4 @@
-import { message, Select, Space, Switch, Typography } from 'antd';
+import { message, Select, Space, Switch, Tag, Typography } from 'antd';
 import { useAppStore } from '@/stores/useAppStore';
 import { SectionCard } from '@/components';
 import './Account.css';
@@ -50,12 +50,12 @@ export default function PreferencesPage() {
               </div>
               <Switch checked={prefs.demoMode} onChange={(v) => set('demoMode', v)} />
             </div>
-            <div className="pref-row">
+            <div className="pref-row" style={{ opacity: 0.55 }}>
               <div>
                 <Text strong>深色主题</Text>
-                <div className="pref-desc">立即切换全站界面配色</div>
+                <div className="pref-desc">切换界面配色 <Tag color="orange" style={{ marginLeft: 4, fontSize: 10 }}>即将上线</Tag></div>
               </div>
-              <Switch checked={prefs.theme === 'dark'} onChange={(v) => set('theme', v ? 'dark' : 'light')} />
+              <Switch checked={prefs.theme === 'dark'} disabled />
             </div>
           </div>
         </SectionCard>
