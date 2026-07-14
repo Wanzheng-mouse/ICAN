@@ -77,12 +77,13 @@ export default function Home() {
   const [uploadedSlots, setUploadedSlots] = useState<Record<string, boolean>>({});
   const [generating, setGenerating] = useState(false);
   const [genStep, setGenStep] = useState(0);
+  const [showUploads, setShowUploads] = useState(false);
 
-  const cards = useMemo(() => homeStaticData.cards(), []);
+  const { data: apiTemplates, isLoading: templatesLoading } = useTemplates('scene');
+  const cards = useMemo(() => apiTemplates ?? homeStaticData.cards(), [apiTemplates]);
   const features = useMemo(() => homeStaticData.features(), []);
   const steps = useMemo(() => homeStaticData.steps(), []);
   const uploads = useMemo(() => homeStaticData.uploadItems(), []);
-  const { isLoading: templatesLoading } = useTemplates('scene');
 
   const handleUpload: UploadProps['customRequest'] = (options) => {
     setTimeout(() => {
@@ -101,25 +102,26 @@ export default function Home() {
     }
     setGenerating(true);
     setGenStep(0);
-    // 创建项目
-    const proj = await createProject({ name: requirement.slice(0, 40), requirement });
-    // 创建场景
-    const scn = await createScenario({ project_id: proj.id, name: `${requirement.slice(0, 20)}场景`, data: { components: [], canvas: { width: 1200, height: 800, scale: 1 }, schema_version: '1.0' } });
-    // 写入上下文
-    setProjectContext({ projectId: proj.id, scenarioId: scn.id });
-    // 模拟进度动画
-    const interval = setInterval(() => {
-      setGenStep((prev) => {
-        if (prev >= 6) {
-          clearInterval(interval);
-          setGenerating(false);
-          message.success(`方案已创建（项目: ${proj.id} / 场景: ${scn.id}）`);
-          setTimeout(() => navigate(`/editor?projectId=${proj.id}&scenarioId=${scn.id}`), 800);
-          return 6;
-        }
-        return prev + 1;
-      });
-    }, 500);
+    try {
+      const proj = await createProject({ name: requirement.slice(0, 40), requirement });
+      const scn = await createScenario({ project_id: proj.id, name: `${requirement.slice(0, 20)}场景`, data: { components: [], canvas: { width: 1200, height: 800, scale: 1 }, schema_version: '1.0' } });
+      setProjectContext({ projectId: proj.id, scenarioId: scn.id });
+      const interval = setInterval(() => {
+        setGenStep((prev) => {
+          if (prev >= 6) {
+            clearInterval(interval);
+            setGenerating(false);
+            message.success(`方案已创建（项目: ${proj.id} / 场景: ${scn.id}）`);
+            setTimeout(() => navigate(`/editor?projectId=${proj.id}&scenarioId=${scn.id}`), 800);
+            return 6;
+          }
+          return prev + 1;
+        });
+      }, 500);
+    } catch (err: unknown) {
+      setGenerating(false);
+      message.error(err instanceof Error ? err.message : '创建失败，请稍后重试');
+    }
   };
 
   const handleUseExample = () => {
@@ -131,17 +133,23 @@ export default function Home() {
   const handleTemplateAction = async (tplTitle: string, action: 'preview' | 'use' | 'quick') => {
     if (action === 'preview') {
       message.info(`正在预览「${tplTitle}」场景模板`);
-    } else if (action === 'use') {
-      const proj = await createProject({ name: tplTitle, requirement: `使用模板 ${tplTitle}` });
-      const scn = await createScenario({ project_id: proj.id, name: `${tplTitle}场景`, data: { components: [], canvas: { width: 1200, height: 800, scale: 1 }, schema_version: '1.0' } });
-      setProjectContext({ projectId: proj.id, scenarioId: scn.id });
-      message.success(`已创建项目「${tplTitle}」，跳转编辑器`);
-      setTimeout(() => navigate(`/editor?projectId=${proj.id}&scenarioId=${scn.id}`), 600);
-    } else if (action === 'quick') {
-      const proj = await createProject({ name: `快速体验-${tplTitle}`, requirement: `快速体验 ${tplTitle}` });
-      setProjectContext({ projectId: proj.id });
-      message.success('快速体验模式已启动');
-      setTimeout(() => navigate('/simulation'), 800);
+      return;
+    }
+    try {
+      if (action === 'use') {
+        const proj = await createProject({ name: tplTitle, requirement: `使用模板 ${tplTitle}` });
+        const scn = await createScenario({ project_id: proj.id, name: `${tplTitle}场景`, data: { components: [], canvas: { width: 1200, height: 800, scale: 1 }, schema_version: '1.0' } });
+        setProjectContext({ projectId: proj.id, scenarioId: scn.id });
+        message.success(`已创建项目「${tplTitle}」，跳转编辑器`);
+        setTimeout(() => navigate(`/editor?projectId=${proj.id}&scenarioId=${scn.id}`), 600);
+      } else if (action === 'quick') {
+        const proj = await createProject({ name: `快速体验-${tplTitle}`, requirement: `快速体验 ${tplTitle}` });
+        setProjectContext({ projectId: proj.id });
+        message.success('快速体验模式已启动');
+        setTimeout(() => navigate('/simulation'), 800);
+      }
+    } catch (err: unknown) {
+      message.error(err instanceof Error ? err.message : '操作失败，请稍后重试');
     }
   };
 
@@ -211,43 +219,41 @@ export default function Home() {
             </div>
           </div>
 
-          {/* 4 个文件上传 */}
+          {/* 4 个文件上传（折叠） */}
           <div className="section-card">
-            <div className="section-title flex-between" style={{ marginBottom: 16 }}>
+            <div className="section-title flex-between" style={{ marginBottom: 16, cursor: 'pointer' }} onClick={() => setShowUploads(!showUploads)}>
               <span>
                 <span className="icon">📎</span>
-                补充资料
+                补充资料 <span style={{ fontSize: 12, color: '#9ca3af', fontWeight: 400 }}>（{showUploads ? '点击收起' : '点击展开，非必填'}）</span>
               </span>
               <span style={{ fontSize: 12, color: '#9ca3af' }}>
-                已上传 {Object.keys(uploadedSlots).length} / {uploads.length}
+                {Object.keys(uploadedSlots).length} / {uploads.length} 已上传
+                <span style={{ marginLeft: 8 }}>{showUploads ? '▲' : '▼'}</span>
               </span>
             </div>
-            <div className="upload-grid">
-              {uploads.map((item) => (
-                <div key={item.slot} className={`upload-card ${uploadedSlots[item.slot] ? 'uploaded' : ''}`}>
-                  <div className="upload-card-icon" style={{ background: `${item.iconColor}18`, color: item.iconColor }}>
-                    {iconMap[item.iconName]}
+            {showUploads && (
+              <div className="upload-grid">
+                {uploads.map((item) => (
+                  <div key={item.slot} className={`upload-card ${uploadedSlots[item.slot] ? 'uploaded' : ''}`}>
+                    <div className="upload-card-icon" style={{ background: `${item.iconColor}18`, color: item.iconColor }}>
+                      {iconMap[item.iconName]}
+                    </div>
+                    <div className="upload-card-body">
+                      <div className="upload-card-title">{item.title}</div>
+                      <div className="upload-card-desc">{item.description}</div>
+                      <Upload accept={item.accept} customRequest={handleUpload} showUploadList={false} maxCount={1}>
+                        <Button type="default" icon={<CloudUploadOutlined />} className="upload-btn">
+                          {uploadedSlots[item.slot] ? '已上传 · 重新上传' : '上传文件'}
+                        </Button>
+                      </Upload>
+                    </div>
+                    {uploadedSlots[item.slot] && (
+                      <CheckCircleFilled style={{ position: 'absolute', top: 12, right: 12, color: '#22c55e', fontSize: 18 }} />
+                    )}
                   </div>
-                  <div className="upload-card-body">
-                    <div className="upload-card-title">{item.title}</div>
-                    <div className="upload-card-desc">{item.description}</div>
-                    <Upload
-                      accept={item.accept}
-                      customRequest={handleUpload}
-                      showUploadList={false}
-                      maxCount={1}
-                    >
-                      <Button type="default" icon={<CloudUploadOutlined />} className="upload-btn">
-                        {uploadedSlots[item.slot] ? '已上传 · 重新上传' : '上传文件'}
-                      </Button>
-                    </Upload>
-                  </div>
-                  {uploadedSlots[item.slot] && (
-                    <CheckCircleFilled style={{ position: 'absolute', top: 12, right: 12, color: '#22c55e', fontSize: 18 }} />
-                  )}
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* 热门场景模板 */}
@@ -267,7 +273,7 @@ export default function Home() {
                     <div className="template-card-title">{tpl.title}</div>
                     <div className="template-card-desc">{tpl.description}</div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
-                      <Tag color="blue" className="template-tag">{tpl.tag}</Tag>
+                      <Tag color="blue" className="template-tag">{'tag' in tpl ? (tpl as { tag: string }).tag : '快速体验'}</Tag>
                       <Space size={4}>
                         <Button size="small" type="text" icon={<EyeOutlined />} onClick={() => handleTemplateAction(tpl.title, 'preview')} />
                         <Button size="small" type="primary" onClick={() => handleTemplateAction(tpl.title, 'use')}>
