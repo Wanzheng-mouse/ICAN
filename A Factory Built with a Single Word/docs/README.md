@@ -1,35 +1,30 @@
-# ICAN 无人仓生成与进化平台 (DuMate)
+# ICAN 文档索引
 
-> A Factory Built with a Single Word.
+这里集中维护当前前后端契约、开发流程和历史交付记录。若文档描述与实现不一致，按以下事实来源核对：
 
-## 项目简介
+1. 后端路由与 Pydantic 模型：`services/api/app/main.py`
+2. 前端 DTO：`apps/web/src/api/dtos/backend.ts`
+3. 前端请求路径：`apps/web/src/api/modules/` 与 `apps/web/src/utils/apiUrl.ts`
+4. 可执行验证：`services/api/tests/` 与 `apps/web/src/**/*.test.ts`
 
-ICAN（DuMate / 一言造厂）是一个**无人仓生成与进化平台**：用户通过自然语言描述需求并上传订单/平面图等资料，系统自动生成仓库场景、编排任务、运行仿真、诊断问题并迭代优化方案，最终输出可对比的进化报告。
+## 当前文档
 
-## MVP 演示主线
+| 文档 | 用途 | 适用读者 |
+| --- | --- | --- |
+| [项目 README](../README.md) | 项目能力、快速启动、目录和当前边界 | 所有人 |
+| [本地开发与联调](./local-development.md) | 全栈启动、Mock/真实模式、验证和排错 | 前后端开发者 |
+| [API 接口契约](./api-contract.md) | REST/WebSocket 字段、状态码和未实现边界 | 前后端开发者 |
+| [前端开发指南](./web-dev-guide.md) | 前端目录、数据层、环境变量和协作规范 | 前端开发者 |
+| [API 服务 README](../services/api/README.md) | FastAPI 安装、配置、测试与限制 | 后端开发者 |
+| [总开发方案](../ICAN-无人仓仿真决策平台开发方案.md) | 完整目标、分工和周计划 | 项目成员 |
 
-1. 选择「电商中型仓」模板
-2. 输入需求并生成项目
-3. 查看/微调二维仓库场景
-4. 启动 10 台 AGV 执行 20 个订单
-5. 注入「道路封闭」或「低电量」异常
-6. 系统发现拥堵/延迟问题
-7. 自动生成优化方案并再次仿真
-8. 在进化报告中展示改善结果并导出 PDF
+## 历史文档
 
-## 团队分工
+- [阶段 1 完成总结](./stage-1-summary.md)：第 1 周前端交付快照，其中测试数量和待办只代表当时状态；当前状态以项目 README 和实际测试结果为准。
 
-- **负责人 A**：前端（`apps/web/`、`packages/mock-data/`、`packages/contracts/`）
-- **负责人 B**：后端 + 仿真（`services/api/`、`services/simulation/`、`scenarios/`、`reports/`）
+## 更新规则
 
-## 文档索引
-
-- [总开发方案](../ICAN-无人仓仿真决策平台开发方案.md) — 完整技术方案与阶段计划
-- [API 接口契约](./api-contract.md) — REST/WebSocket 协议
-- [前端开发指南](./web-dev-guide.md) — 前端规范与目录说明
-
-## 技术栈
-
-- 前端：Vite + React 18 + TypeScript + Ant Design 5 + ECharts + Konva + React Flow + Zustand + TanStack Query
-- 后端：FastAPI + Pydantic + SQLAlchemy + SimPy + NetworkX + A*
-- 部署：Docker + Docker Compose
+- 修改后端字段或路径时，同一提交更新 `api-contract.md` 和前端 DTO/调用层。
+- 修改启动方式、端口、环境变量或依赖时，同一提交更新项目 README 与对应开发指南。
+- 新增真实接口时，从“当前边界”删除对应 Mock 说明，并补充至少一个契约测试。
+- 阶段总结作为历史快照保留，不用新状态覆盖旧记录。

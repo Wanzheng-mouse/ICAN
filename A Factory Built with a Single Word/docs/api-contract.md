@@ -12,18 +12,18 @@
 - 数据格式: JSON
 - 时间格式: ISO 8601 字符串 (`datetime.isoformat()`)
 
-## 第 1 周冻结范围
+## 第 1 周已对齐范围
 
 - 已接入真实后端：`/health`、`/api/health`、模板、项目与场景接口；模板与健康检查使用 `/api`，项目和场景使用 `/api/v1`。
 - 本周不提供认证、搜索、通知接口；前端继续以 Mock 实现这些模块，不能假设存在后端登录态或通知数据。
 - 场景请求的 `data` 固定包含 `components`、`canvas` 和 `schema_version: "1.0"`；模板时间字段为 `updatedAt`。
-## 第 2 周冻结范围
+## 第 2 周已对齐范围
 
 - 项目响应严格使用 `ProjectRead`，默认状态为 `draft`，不再返回前端 DTO 中不存在的 `owner`。
 - 模板详情使用 `TemplateDetailRead`，其中 `data` 是可直接保存的 `ScenarioData`。
 - `POST /api/templates/{id}/apply`（兼容 `/api/v1/templates/{id}/apply`）会校验项目和场景模板，并创建持久化场景；返回的 `scenario.id` 可直接传给编辑器。
 - 首页创建/应用模板后必须同时保存并传递真实 `projectId` 与 `scenarioId`；编辑器刷新时按该 `scenarioId` 重新加载同一场景。
-## 第 3 周冻结范围
+## 第 3 周已对齐范围
 
 - `ScenarioData` 严格包含 `components`、`canvas` 和 `schema_version: "1.0"`；组件字段禁止缺失或携带未声明字段。
 - 场景创建和保存执行 schema、组件 ID、画布边界与矩形重叠校验；独立校验接口返回结构化错误码。
@@ -36,7 +36,7 @@
 
 ```http
 GET  /health
-→ { "status": "ok" }
+→ { "status": "ok", "service": "ican-api" }
 ```
 
 ### 2.2 模板（前缀 /api/templates）
@@ -143,7 +143,7 @@ Body: { project_id, scenario_id, robot_count?, order_count? }
 
 POST /api/v1/simulations/{id}/control
 Body: { action: "start"|"pause"|"stop" }
-→ { "status": "ok" }
+→ SimulationRead（status 已更新）
 
 POST /api/v1/simulations/{id}/anomalies
 Body: { type: "road_closed"|"low_battery"|"order_surge", description?: "" }
@@ -191,8 +191,8 @@ GET  /api/v1/reports/{simulationId}/pdf
 ```
 
 **注意**：`/api/v1/reports/{id}/kpis`、`/trend`、`/anomalies` 等数据接口
-  后端当前未提供。前端在 VITE_USE_MOCK=false 时不应调用这些地址。
-  复杂图表数据源将在阶段 2 后端补齐后逐项切换。
+  后端当前未提供。前端在 `VITE_USE_MOCK=false` 时调用这些地址会返回 404，真实联调期间不要进入对应页面。
+  新增对应后端接口和契约测试后，前端才能逐项切换为真实数据。
 
 ## 3. WebSocket
 
@@ -200,32 +200,36 @@ GET  /api/v1/reports/{simulationId}/pdf
 WS /api/v1/simulations/{id}/stream
 ```
 
-推送消息：
+服务端连接成功后每秒推送一次：
 
 ```ts
-// simulation_tick: 仿真状态更新
-{ type: "simulation_tick", run_id, time, robots, events, metrics }
-
-// simulation_done: 仿真完成
-{ type: "simulation_done", run_id, final_metrics }
-
-// pong: 心跳回复
-{ type: "pong" }
+{
+  type: "simulation_tick",
+  run_id: string,
+  time: number,
+  robots: Array<{ id: string; state: string; battery: number }>,
+  tasks: { total: number; completed: number },
+  events: Array<Record<string, unknown>>,
+  metrics: Record<string, number>,
+  generated_at: string
+}
 ```
 
-心跳：客户端每 15s 发送 `{"type":"ping"}`，服务端回复 `{"type":"pong"}`。
+前端 `WsClient` 当前每 15 秒发送一次 `{"type":"ping"}`，但后端尚未读取心跳或返回 `pong`；客户端不能依赖 `pong` 判断连接健康。服务端当前也不推送 `simulation_done`。
 
-## 4. 阶段 1 边界说明
+## 4. 当前真实接口边界
 
 | 功能 | 状态 | 说明 |
 | --- | --- | --- |
-| 认证（登录/注册/退出） | Mock | 后端阶段 2 提供 |
-| 用户资料/修改密码 | Mock | 后端阶段 2 提供 |
+| 认证（登录/注册/退出） | Mock | 后端当前未提供 |
+| 用户资料/修改密码 | Mock | 后端当前未提供 |
 | 搜索 | Mock | 本地索引，无后端接口 |
 | 通知 | Mock | 本地 Store，无后端接口 |
-| 资源中心 | Mock | 后端阶段 2 提供 |
-| 任务编排 | Mock | 后端阶段 2 提供 |
-| 报告图表（KPI/趋势/异常分布） | Mock | 后端阶段 2 提供 |
+| 资源中心 | Mock | 后端当前未提供 |
+| 任务编排 | Mock | 后端当前未提供 |
+| 仿真 agents/events 列表 | Mock | 后端只提供运行级响应与 WebSocket tick |
+| 进化趋势/versions | Mock | 后端当前只提供创建和按 ID 读取 |
+| 报告图表（KPI/趋势/异常分布） | Mock | 后端当前只提供 PDF 占位下载 |
 
 ## 5. 错误响应
 
