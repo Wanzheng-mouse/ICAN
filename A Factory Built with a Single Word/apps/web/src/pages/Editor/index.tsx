@@ -19,7 +19,14 @@ import { App, Button, Dropdown, Input, InputNumber, Modal, Select, Tabs, Tag } f
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { SectionCard } from '@/components';
 import type { SceneComponent } from '@ican/contracts';
-import { useScenario, useSaveScenario } from '@/api/modules';
+import type { ScenarioData } from '@/api/dtos/backend';
+import {
+  ScenarioConflictError,
+  ScenarioValidationError,
+  useAutoLayoutScenario,
+  useScenario,
+  useSaveScenario,
+} from '@/api/modules';
 import { useAppStore } from '@/stores/useAppStore';
 import {
   editorComponentLibrary,
@@ -67,6 +74,16 @@ const initialComponents: SceneComponent[] = [
 ];
 
 const HISTORY_LIMIT = 30;
+type SaveStatus = 'saved' | 'dirty' | 'saving' | 'conflict' | 'invalid' | 'error';
+
+const saveStatusMeta: Record<SaveStatus, { color: string; text: string }> = {
+  saved: { color: 'success', text: '已保存' },
+  dirty: { color: 'warning', text: '未保存' },
+  saving: { color: 'processing', text: '保存中...' },
+  conflict: { color: 'error', text: '版本冲突' },
+  invalid: { color: 'error', text: '校验失败' },
+  error: { color: 'error', text: '保存失败' },
+};
 
 export default function Editor() {
   const { message } = App.useApp();
@@ -81,6 +98,7 @@ export default function Editor() {
   // ===== 领域 API 接入 =====
   const { data: serverData, isLoading, isError } = useScenario(scenarioId ?? '');
   const saveMutation = useSaveScenario(scenarioId ?? '');
+  const autoLayoutMutation = useAutoLayoutScenario(scenarioId ?? '');
 
   const [components, setComponents] = useState<SceneComponent[]>(initialComponents);
   // 历史栈：past 是可 undo 的快照，future 是可 redo 的快照
@@ -88,8 +106,10 @@ export default function Editor() {
   const [future, setFuture] = useState<SceneComponent[][]>([]);
   const [selectedId, setSelectedId] = useState<string | null>('shelf-A1');
   const [tool, setTool] = useState<string>('select');
-  const [saveStatus, setSaveStatus] = useState<'saved' | 'dirty' | 'saving'>('saved');
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
   const [zoom, setZoom] = useState(100);
+  const [scenarioVersion, setScenarioVersion] = useState<number | null>(null);
+  const [scenarioCanvas, setScenarioCanvas] = useState<ScenarioData['canvas']>({ width: 1200, height: 800, scale: 1 });
   const [logs, setLogs] = useState(editorOperationLogs);
   const lastLoadedAtRef = useRef<number>(0);
 
@@ -101,8 +121,10 @@ export default function Editor() {
 
   useEffect(() => {
     if (!serverData) return;
-    setComponents(serverData);
-    setSelectedId(serverData[0]?.id ?? null);
+    setComponents(serverData.data.components);
+    setSelectedId(serverData.data.components[0]?.id ?? null);
+    setScenarioVersion(serverData.version);
+    setScenarioCanvas(serverData.data.canvas);
     setPast([]);
     setFuture([]);
     setSaveStatus('saved');
@@ -267,15 +289,24 @@ export default function Editor() {
       return;
     }
     setSaveStatus('saving');
-    saveMutation.mutate(components, {
-      onSuccess: (result: { savedAt: string }) => {
+    saveMutation.mutate({ components, canvas: scenarioCanvas, expectedVersion: scenarioVersion ?? undefined }, {
+      onSuccess: (saved) => {
+        setScenarioVersion(saved.version);
         setSaveStatus('saved');
-        addLogInternal('你', '保存草稿', `${components.length} 个组件`, result.savedAt);
-        message.success(`草稿已保存（${components.length} 个组件）`);
+        addLogInternal('你', '保存草稿', `${components.length} 个组件`, saved.updated_at);
+        message.success(`草稿已保存为版本 v${saved.version}`);
       },
-      onError: () => {
-        setSaveStatus('dirty');
-        message.error('保存失败，请稍后重试');
+      onError: (error) => {
+        if (error instanceof ScenarioConflictError) {
+          setSaveStatus('conflict');
+          message.warning('检测到版本冲突，请重新加载最新场景后再保存');
+        } else if (error instanceof ScenarioValidationError) {
+          setSaveStatus('invalid');
+          message.error(error.message);
+        } else {
+          setSaveStatus('error');
+          message.error('保存失败，请检查后端服务后重试');
+        }
       },
     });
   };
@@ -289,44 +320,54 @@ export default function Editor() {
       message.error('场景加载失败，请检查后端服务后重试');
       return;
     }
-    if (saveStatus === 'dirty') {
-      Modal.confirm({
-        title: '放弃未保存的修改？',
-        content: '当前有未保存的修改，重新加载将丢失这些更改。',
-        okText: '放弃并重新加载',
-        cancelText: '取消',
-        onOk: () => {
-          lastLoadedAtRef.current = Date.now();
-          if (serverData) setComponents(serverData);
-          setSaveStatus('saved');
-          setPast([]);
-          setFuture([]);
-          addLogInternal('系统', '从服务器重新加载');
-          message.success('已从服务器重新加载');
-        },
-      });
-    } else if (serverData) {
-      setComponents(serverData);
+
+    const applyServerData = () => {
+      if (!serverData) return;
+      setComponents(serverData.data.components);
+      setSelectedId(serverData.data.components[0]?.id ?? null);
+      setScenarioVersion(serverData.version);
+      setScenarioCanvas(serverData.data.canvas);
+      setSaveStatus('saved');
       setPast([]);
       setFuture([]);
-      addLogInternal('系统', '从服务器重新加载');
-      message.success('已从服务器重新加载');
+      addLogInternal('系统', '从服务器重新加载', `v${serverData.version}`);
+      message.success(`已加载服务器版本 v${serverData.version}`);
+    };
+
+    if (saveStatus !== 'saved') {
+      Modal.confirm({
+        title: '放弃未保存的修改？',
+        content: '当前修改、冲突或校验状态将被服务器版本覆盖。',
+        okText: '放弃并重新加载',
+        cancelText: '取消',
+        onOk: applyServerData,
+      });
+    } else if (serverData) {
+      applyServerData();
     } else {
       message.info(isLoading ? '场景仍在加载中' : '服务器没有可加载的场景数据');
     }
   };
 
   const handleAutoLayout = () => {
-    message.loading('正在自动生成布局…', 1.2);
-    setTimeout(() => {
-      setComponents((cs) => {
-        pushHistory(cs);
-        return cs;
-      });
-      setSaveStatus('dirty');
-      addLogInternal('系统', '自动生成布局');
-      message.success('布局已自动生成');
-    }, 1300);
+    if (!scenarioId) {
+      message.warning('缺少场景 ID，无法执行自动布局');
+      return;
+    }
+    autoLayoutMutation.mutate({ components, canvas: scenarioCanvas }, {
+      onSuccess: (result) => {
+        pushHistory(components);
+        setComponents(result.data.components);
+        setScenarioCanvas(result.data.canvas);
+        setSelectedId(result.data.components[0]?.id ?? null);
+        setSaveStatus('dirty');
+        addLogInternal('系统', '后端自动布局', `${result.data.components.length} 个组件`);
+        message.success('布局已由后端生成，请保存草稿');
+      },
+      onError: (error) => {
+        message.error(error instanceof Error ? error.message : '自动布局失败');
+      },
+    });
   };
 
   const handleEnterSim = () => {
@@ -383,9 +424,9 @@ export default function Editor() {
         <div className="editor-header-left">
           <h1 className="editor-title">
             场景编辑器 / 仓库建模
-            <span className="version-tag">v1.2.0</span>
-            <Tag color={saveStatus === 'saved' ? 'success' : saveStatus === 'saving' ? 'processing' : 'warning'} className="save-tag">
-              {saveStatus === 'saved' ? '已保存' : saveStatus === 'saving' ? '保存中...' : '未保存'}
+            <span className="version-tag">v{scenarioVersion ?? "—"}</span>
+            <Tag color={saveStatusMeta[saveStatus].color} className="save-tag">
+              {saveStatusMeta[saveStatus].text}
             </Tag>
             {selected && <Tag color="blue" className="save-tag">已选中: {selected.name}</Tag>}
             {!scenarioId && <Tag color="warning" className="save-tag">未绑定场景</Tag>}
@@ -399,7 +440,7 @@ export default function Editor() {
             <Button icon={<RedoOutlined />} onClick={redo} disabled={future.length === 0} title="重做 (Ctrl+Y)">重做</Button>
           </Button.Group>
           <Button icon={<ReloadOutlined />} onClick={handleReload}>重新加载</Button>
-          <Button icon={<ThunderboltOutlined />} onClick={handleAutoLayout}>自动生成布局</Button>
+          <Button icon={<ThunderboltOutlined />} onClick={handleAutoLayout} loading={autoLayoutMutation.isPending}>自动生成布局</Button>
           <Button icon={<SaveOutlined />} onClick={handleSave} loading={saveStatus === 'saving'}>保存草稿</Button>
           <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleEnterSim}>进入仿真</Button>
         </div>

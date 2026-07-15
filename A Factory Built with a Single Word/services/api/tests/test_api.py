@@ -84,3 +84,129 @@ def test_week_two_template_application_flow():
             json={"project_id": project["id"]},
         )
         assert invalid.status_code == 400
+
+def test_week_three_scenario_validation_layout_and_versioning():
+    with TestClient(app) as client:
+        project = client.post(
+            "/api/v1/projects",
+            json={"name": "Week three project"},
+        ).json()
+        valid_data = {
+            "schema_version": "1.0",
+            "canvas": {"width": 600, "height": 400, "scale": 1},
+            "components": [
+                {
+                    "id": "shelf-1",
+                    "type": "shelf",
+                    "name": "Shelf 1",
+                    "x": 20,
+                    "y": 20,
+                    "width": 120,
+                    "height": 60,
+                    "rotation": 0,
+                    "properties": {},
+                },
+                {
+                    "id": "agv-1",
+                    "type": "agv",
+                    "name": "AGV 1",
+                    "x": 200,
+                    "y": 20,
+                    "width": 30,
+                    "height": 20,
+                    "rotation": 0,
+                    "properties": {"battery": 80},
+                },
+            ],
+        }
+        created = client.post(
+            "/api/v1/scenarios",
+            json={"project_id": project["id"], "name": "Editable scene", "data": valid_data},
+        )
+        assert created.status_code == 201
+        scenario = created.json()
+        assert scenario["version"] == 1
+
+        out_of_bounds = {
+            **valid_data,
+            "components": [{**valid_data["components"][0], "x": -10}],
+        }
+        validation = client.post(
+            f"/api/v1/scenarios/{scenario['id']}/validate",
+            json={"data": out_of_bounds},
+        )
+        assert validation.status_code == 200
+        assert validation.json()["valid"] is False
+        assert validation.json()["errors"][0]["code"] == "OUT_OF_BOUNDS"
+
+        schema_invalid = client.post(
+            f"/api/v1/scenarios/{scenario['id']}/validate",
+            json={"data": {**valid_data, "schema_version": "2.0"}},
+        )
+        assert schema_invalid.status_code == 200
+        assert schema_invalid.json()["errors"][0]["code"] == "SCHEMA_INVALID"
+
+        overlapping = {
+            **valid_data,
+            "components": [
+                valid_data["components"][0],
+                {**valid_data["components"][1], "x": 40, "y": 30},
+            ],
+        }
+        overlap_result = client.post(
+            f"/api/v1/scenarios/{scenario['id']}/validate",
+            json={"data": overlapping},
+        )
+        assert overlap_result.json()["valid"] is False
+        assert overlap_result.json()["errors"][0]["code"] == "COMPONENT_OVERLAP"
+
+        invalid_save = client.put(
+            f"/api/v1/scenarios/{scenario['id']}",
+            json={"data": out_of_bounds, "expected_version": 1},
+        )
+        assert invalid_save.status_code == 422
+
+        layout = client.post(
+            f"/api/v1/scenarios/{scenario['id']}/auto-layout",
+            json={"data": overlapping},
+        )
+        assert layout.status_code == 200
+        assert layout.json()["validation"]["valid"] is True
+
+        duplicate_ids = {
+            **valid_data,
+            "components": [
+                valid_data["components"][0],
+                {**valid_data["components"][1], "id": "shelf-1"},
+            ],
+        }
+        invalid_layout = client.post(
+            f"/api/v1/scenarios/{scenario['id']}/auto-layout",
+            json={"data": duplicate_ids},
+        )
+        assert invalid_layout.status_code == 422
+        assert invalid_layout.json()["detail"]["code"] == "SCENARIO_VALIDATION_FAILED"
+
+        saved = client.put(
+            f"/api/v1/scenarios/{scenario['id']}",
+            json={"data": layout.json()["data"], "expected_version": 1},
+        )
+        assert saved.status_code == 200
+        assert saved.json()["version"] == 2
+
+        refreshed = client.get(f"/api/v1/scenarios/{scenario['id']}")
+        assert refreshed.status_code == 200
+        assert refreshed.json()["version"] == 2
+        assert refreshed.json()["data"] == saved.json()["data"]
+
+        versions = client.get(f"/api/v1/scenarios/{scenario['id']}/versions")
+        assert versions.status_code == 200
+        assert [item["version"] for item in versions.json()] == [1, 2]
+
+        stale_save = client.put(
+            f"/api/v1/scenarios/{scenario['id']}",
+            json={"data": valid_data, "expected_version": 1},
+        )
+        assert stale_save.status_code == 409
+        assert stale_save.json()["detail"]["code"] == "SCENARIO_VERSION_CONFLICT"
+        assert stale_save.json()["detail"]["current_version"] == 2

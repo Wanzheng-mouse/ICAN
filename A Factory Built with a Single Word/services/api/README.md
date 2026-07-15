@@ -23,7 +23,10 @@
 - POST、GET /api/v1/projects，GET /api/v1/projects/{id}
 - GET /api/templates、GET /api/templates/{id}（兼容 /api/v1/templates），详情包含可保存的场景 data
 - POST /api/templates/{id}/apply（兼容 /api/v1/templates/{id}/apply），将场景模板应用到指定项目并持久化 Scenario
-- POST、GET、PUT /api/v1/scenarios
+- POST、GET、PUT /api/v1/scenarios，保存使用 expected_version 乐观锁并生成版本快照
+- POST /api/v1/scenarios/{id}/validate，执行 schema、边界、重叠和组件 ID 校验
+- POST /api/v1/scenarios/{id}/auto-layout，返回确定性无重叠布局
+- GET /api/v1/scenarios/{id}/versions，查询不可变版本历史
 - POST、GET /api/v1/simulations，仿真控制、异常注入和 WebSocket 实时流
 - POST、GET /api/v1/evolutions
 - GET /api/v1/reports/{simulation_id}/pdf

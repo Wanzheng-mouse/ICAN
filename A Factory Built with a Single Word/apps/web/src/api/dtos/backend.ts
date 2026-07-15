@@ -2,7 +2,7 @@
  * 后端 FastAPI 原始响应 DTO
  *
  * 严格对应 services/api/app/main.py 的 Pydantic models。
- * 2026-07-14 与 main.py 逐字段对齐。
+ * 2026-07-15 与 main.py 第三周场景契约逐字段对齐。
  */
 
 import type { SceneComponent } from '@ican/contracts';
@@ -56,6 +56,7 @@ export interface ScenarioRead {
   project_id: string;
   name: string;
   data: ScenarioData;
+  version: number;
   updated_at: string;
 }
 
@@ -68,8 +69,35 @@ export interface ScenarioCreate {
 export interface ScenarioUpdate {
   name?: string;
   data: ScenarioData;
+  expected_version?: number;
 }
 
+export interface ScenarioValidationIssue {
+  code: string;
+  message: string;
+  component_ids: string[];
+  field?: string;
+}
+
+export interface ScenarioValidationRead {
+  valid: boolean;
+  errors: ScenarioValidationIssue[];
+  warnings: ScenarioValidationIssue[];
+}
+
+export interface ScenarioAutoLayoutRead {
+  data: ScenarioData;
+  validation: ScenarioValidationRead;
+}
+
+export interface ScenarioVersionRead {
+  id: string;
+  scenario_id: string;
+  version: number;
+  name: string;
+  data: ScenarioData;
+  created_at: string;
+}
 // ===== Simulation =====
 export interface SimulationRead {
   id: string;

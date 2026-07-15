@@ -10,7 +10,7 @@ from uuid import uuid4
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import JSON, DateTime, String, Text, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
@@ -81,6 +81,16 @@ class Scenario(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class ScenarioVersion(Base):
+    __tablename__ = "scenario_versions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    scenario_id: Mapped[str] = mapped_column(String(36), index=True)
+    version: Mapped[int] = mapped_column(index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class SimulationRun(Base):
     __tablename__ = "simulation_runs"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -142,14 +152,29 @@ class ScenarioCanvas(BaseModel):
     width: int = Field(default=1200, gt=0)
     height: int = Field(default=800, gt=0)
     scale: float = Field(default=1, gt=0)
+    model_config = {"extra": "forbid"}
+
+
+class ScenarioComponent(BaseModel):
+    id: str = Field(min_length=1, max_length=120)
+    type: Literal["shelf", "agv", "arm", "conveyor", "station", "charger", "obstacle"]
+    name: str = Field(min_length=1, max_length=120)
+    x: float
+    y: float
+    width: float = Field(gt=0)
+    height: float = Field(gt=0)
+    rotation: float = 0
+    properties: dict[str, Any] = Field(default_factory=dict)
+    model_config = {"extra": "forbid"}
 
 
 class ScenarioData(BaseModel):
-    """前后端冻结的场景 JSON 最小结构。"""
+    """第三周冻结的统一场景 JSON 结构。"""
 
-    components: list[Any] = Field(default_factory=list)
+    components: list[ScenarioComponent] = Field(default_factory=list)
     canvas: ScenarioCanvas = Field(default_factory=ScenarioCanvas)
     schema_version: Literal["1.0"] = "1.0"
+    model_config = {"extra": "forbid"}
 
 
 class TemplateDetailRead(TemplateRead):
@@ -169,13 +194,50 @@ class ScenarioCreate(BaseModel):
 
 class ScenarioRead(ScenarioCreate):
     id: str
+    version: int = Field(ge=1)
     updated_at: datetime
-    model_config = {"from_attributes": True}
 
 
 class ScenarioUpdate(BaseModel):
-    name: str | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=120)
     data: ScenarioData
+    expected_version: int | None = Field(default=None, ge=1)
+
+
+class ScenarioValidationRequest(BaseModel):
+    data: dict[str, Any]
+
+
+class ScenarioValidationIssue(BaseModel):
+    code: str
+    message: str
+    component_ids: list[str] = Field(default_factory=list)
+    field: str | None = None
+
+
+class ScenarioValidationRead(BaseModel):
+    valid: bool
+    errors: list[ScenarioValidationIssue] = Field(default_factory=list)
+    warnings: list[ScenarioValidationIssue] = Field(default_factory=list)
+
+
+class ScenarioAutoLayoutRequest(BaseModel):
+    data: ScenarioData
+
+
+class ScenarioAutoLayoutRead(BaseModel):
+    data: ScenarioData
+    validation: ScenarioValidationRead
+
+
+class ScenarioVersionRead(BaseModel):
+    id: str
+    scenario_id: str
+    version: int
+    name: str
+    data: ScenarioData
+    created_at: datetime
+    model_config = {"from_attributes": True}
 
 
 class SimulationCreate(BaseModel):
@@ -269,6 +331,177 @@ def seed_templates(db: Session) -> None:
     db.commit()
 
 
+def latest_scenario_version(db: Session, scenario_id: str) -> int:
+    snapshot = (
+        db.query(ScenarioVersion)
+        .filter(ScenarioVersion.scenario_id == scenario_id)
+        .order_by(ScenarioVersion.version.desc())
+        .first()
+    )
+    return snapshot.version if snapshot else 1
+
+
+def add_scenario_version(db: Session, scenario: Scenario, version: int) -> ScenarioVersion:
+    snapshot = ScenarioVersion(
+        scenario_id=scenario.id,
+        version=version,
+        name=scenario.name,
+        data=deepcopy(scenario.data),
+    )
+    db.add(snapshot)
+    return snapshot
+
+
+def seed_scenario_versions(db: Session) -> None:
+    """Create version 1 snapshots for scenarios created before Week 3."""
+    for scenario in db.query(Scenario).all():
+        exists = db.query(ScenarioVersion).filter(ScenarioVersion.scenario_id == scenario.id).first()
+        if exists is None:
+            add_scenario_version(db, scenario, 1)
+    db.commit()
+
+
+def scenario_to_read(scenario: Scenario, db: Session) -> ScenarioRead:
+    return ScenarioRead(
+        id=scenario.id,
+        project_id=scenario.project_id,
+        name=scenario.name,
+        data=ScenarioData.model_validate(scenario.data),
+        version=latest_scenario_version(db, scenario.id),
+        updated_at=scenario.updated_at,
+    )
+
+
+class ScenarioService:
+    """Validation and deterministic layout for editor scenarios."""
+
+    @staticmethod
+    def _schema_issues(error: ValidationError) -> list[ScenarioValidationIssue]:
+        issues: list[ScenarioValidationIssue] = []
+        for item in error.errors():
+            field = ".".join(str(value) for value in item["loc"])
+            issues.append(
+                ScenarioValidationIssue(
+                    code="SCHEMA_INVALID",
+                    message=f"{field}: {item['msg']}",
+                    field=field,
+                )
+            )
+        return issues
+
+    def validate_raw(self, raw_data: dict[str, Any]) -> tuple[ScenarioData | None, ScenarioValidationRead]:
+        try:
+            data = ScenarioData.model_validate(raw_data)
+        except ValidationError as error:
+            issues = self._schema_issues(error)
+            return None, ScenarioValidationRead(valid=False, errors=issues)
+        return data, self.validate(data)
+
+    def validate(self, data: ScenarioData) -> ScenarioValidationRead:
+        errors: list[ScenarioValidationIssue] = []
+        warnings: list[ScenarioValidationIssue] = []
+        seen_ids: set[str] = set()
+
+        for component in data.components:
+            if component.id in seen_ids:
+                errors.append(
+                    ScenarioValidationIssue(
+                        code="DUPLICATE_COMPONENT_ID",
+                        message=f"组件 ID {component.id} 重复",
+                        component_ids=[component.id],
+                        field="components.id",
+                    )
+                )
+            seen_ids.add(component.id)
+
+            if (
+                component.x < 0
+                or component.y < 0
+                or component.x + component.width > data.canvas.width
+                or component.y + component.height > data.canvas.height
+            ):
+                errors.append(
+                    ScenarioValidationIssue(
+                        code="OUT_OF_BOUNDS",
+                        message=f"组件 {component.name} 超出画布边界",
+                        component_ids=[component.id],
+                        field="components.position",
+                    )
+                )
+
+        for index, left in enumerate(data.components):
+            for right in data.components[index + 1 :]:
+                overlaps = (
+                    left.x < right.x + right.width
+                    and left.x + left.width > right.x
+                    and left.y < right.y + right.height
+                    and left.y + left.height > right.y
+                )
+                if overlaps:
+                    errors.append(
+                        ScenarioValidationIssue(
+                            code="COMPONENT_OVERLAP",
+                            message=f"组件 {left.name} 与 {right.name} 发生重叠",
+                            component_ids=[left.id, right.id],
+                            field="components.position",
+                        )
+                    )
+
+        if not data.components:
+            warnings.append(
+                ScenarioValidationIssue(
+                    code="EMPTY_SCENARIO",
+                    message="场景中暂无组件",
+                    field="components",
+                )
+            )
+
+        return ScenarioValidationRead(valid=not errors, errors=errors, warnings=warnings)
+
+    def auto_layout(self, data: ScenarioData) -> ScenarioAutoLayoutRead:
+        padding = 24.0
+        gap = 24.0
+        cursor_x = padding
+        cursor_y = padding
+        row_height = 0.0
+        laid_out: list[ScenarioComponent] = []
+
+        for component in data.components:
+            if component.width > data.canvas.width - padding * 2 or component.height > data.canvas.height - padding * 2:
+                raise HTTPException(
+                    status_code=422,
+                    detail={"code": "LAYOUT_CANVAS_TOO_SMALL", "message": f"画布无法容纳组件 {component.name}"},
+                )
+            if cursor_x + component.width > data.canvas.width - padding:
+                cursor_x = padding
+                cursor_y += row_height + gap
+                row_height = 0.0
+            if cursor_y + component.height > data.canvas.height - padding:
+                raise HTTPException(
+                    status_code=422,
+                    detail={"code": "LAYOUT_CANVAS_TOO_SMALL", "message": "画布高度不足，无法完成自动布局"},
+                )
+
+            laid_out.append(component.model_copy(update={"x": cursor_x, "y": cursor_y}))
+            cursor_x += component.width + gap
+            row_height = max(row_height, component.height)
+
+        result = data.model_copy(update={"components": laid_out})
+        validation = self.validate(result)
+        if not validation.valid:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "SCENARIO_VALIDATION_FAILED",
+                    "message": "自动布局后场景仍存在不可修复的校验错误",
+                    "issues": [issue.model_dump() for issue in validation.errors],
+                },
+            )
+        return ScenarioAutoLayoutRead(data=result, validation=validation)
+
+
+scenario_service = ScenarioService()
+
 
 class SimulationService:
     """Replace these deterministic calculations with SimPy and AGV algorithms later."""
@@ -351,13 +584,14 @@ async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
     with SessionLocal() as db:
         seed_templates(db)
+        seed_scenario_versions(db)
     yield
 
 
 app = FastAPI(
     title="ICAN Unmanned Warehouse API",
-    version="0.1.0",
-    description="第 2 周后端契约：提供项目、模板详情与应用、场景持久化，并保证前端编辑器使用真实场景 ID。",
+    version="0.2.0",
+    description="第 3 周后端契约：提供场景严格校验、自动布局、乐观锁保存与版本历史，并与前端编辑器保持一致。",
     lifespan=lifespan,
 )
 app.add_middleware(
@@ -402,9 +636,11 @@ def apply_template(template_id: str, payload: TemplateApplyCreate, db: Session =
     data = ScenarioData.model_validate(deepcopy(template.scenario)).model_dump()
     scenario = Scenario(project_id=payload.project_id, name=payload.name or template.title, data=data)
     db.add(scenario)
+    db.flush()
+    add_scenario_version(db, scenario, 1)
     db.commit()
     db.refresh(scenario)
-    return scenario
+    return scenario_to_read(scenario, db)
 
 
 @app.post(f"{PREFIX}/projects", response_model=ProjectRead, status_code=status.HTTP_201_CREATED)
@@ -425,29 +661,98 @@ def list_projects(db: Session = Depends(get_db)) -> list[Project]:
 def get_project(project_id: str, db: Session = Depends(get_db)) -> Project:
     return get_or_404(Project, project_id, db, "Project")
 @app.post(f"{PREFIX}/scenarios", response_model=ScenarioRead, status_code=status.HTTP_201_CREATED)
-def create_scenario(payload: ScenarioCreate, db: Session = Depends(get_db)) -> Scenario:
+def create_scenario(payload: ScenarioCreate, db: Session = Depends(get_db)) -> ScenarioRead:
     get_or_404(Project, payload.project_id, db, "Project")
+    validation = scenario_service.validate(payload.data)
+    if not validation.valid:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "SCENARIO_VALIDATION_FAILED",
+                "message": "场景校验失败",
+                "issues": [issue.model_dump() for issue in validation.errors],
+            },
+        )
     scenario = Scenario(**payload.model_dump())
     db.add(scenario)
+    db.flush()
+    add_scenario_version(db, scenario, 1)
     db.commit()
     db.refresh(scenario)
-    return scenario
+    return scenario_to_read(scenario, db)
 
 
 @app.get(f"{PREFIX}/scenarios/{{scenario_id}}", response_model=ScenarioRead)
-def get_scenario(scenario_id: str, db: Session = Depends(get_db)) -> Scenario:
-    return get_or_404(Scenario, scenario_id, db, "Scenario")
+def get_scenario(scenario_id: str, db: Session = Depends(get_db)) -> ScenarioRead:
+    scenario = get_or_404(Scenario, scenario_id, db, "Scenario")
+    return scenario_to_read(scenario, db)
+
+
+@app.post(f"{PREFIX}/scenarios/{{scenario_id}}/validate", response_model=ScenarioValidationRead)
+def validate_scenario(
+    scenario_id: str,
+    payload: ScenarioValidationRequest,
+    db: Session = Depends(get_db),
+) -> ScenarioValidationRead:
+    get_or_404(Scenario, scenario_id, db, "Scenario")
+    _, validation = scenario_service.validate_raw(payload.data)
+    return validation
+
+
+@app.post(f"{PREFIX}/scenarios/{{scenario_id}}/auto-layout", response_model=ScenarioAutoLayoutRead)
+def auto_layout_scenario(
+    scenario_id: str,
+    payload: ScenarioAutoLayoutRequest,
+    db: Session = Depends(get_db),
+) -> ScenarioAutoLayoutRead:
+    get_or_404(Scenario, scenario_id, db, "Scenario")
+    return scenario_service.auto_layout(payload.data)
+
+
+@app.get(f"{PREFIX}/scenarios/{{scenario_id}}/versions", response_model=list[ScenarioVersionRead])
+def list_scenario_versions(scenario_id: str, db: Session = Depends(get_db)) -> list[ScenarioVersion]:
+    get_or_404(Scenario, scenario_id, db, "Scenario")
+    return list(
+        db.query(ScenarioVersion)
+        .filter(ScenarioVersion.scenario_id == scenario_id)
+        .order_by(ScenarioVersion.version.asc())
+        .all()
+    )
 
 
 @app.put(f"{PREFIX}/scenarios/{{scenario_id}}", response_model=ScenarioRead)
-def update_scenario(scenario_id: str, payload: ScenarioUpdate, db: Session = Depends(get_db)) -> Scenario:
+def update_scenario(scenario_id: str, payload: ScenarioUpdate, db: Session = Depends(get_db)) -> ScenarioRead:
     scenario = get_or_404(Scenario, scenario_id, db, "Scenario")
+    current_version = latest_scenario_version(db, scenario_id)
+    if payload.expected_version is not None and payload.expected_version != current_version:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "SCENARIO_VERSION_CONFLICT",
+                "message": "场景已被其他会话更新，请重新加载后再保存",
+                "current_version": current_version,
+            },
+        )
+
+    validation = scenario_service.validate(payload.data)
+    if not validation.valid:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "SCENARIO_VALIDATION_FAILED",
+                "message": "场景校验失败",
+                "issues": [issue.model_dump() for issue in validation.errors],
+            },
+        )
+
     if payload.name is not None:
         scenario.name = payload.name
     scenario.data = payload.data.model_dump()
+    db.flush()
+    add_scenario_version(db, scenario, current_version + 1)
     db.commit()
     db.refresh(scenario)
-    return scenario
+    return scenario_to_read(scenario, db)
 
 
 @app.post(f"{PREFIX}/simulations", response_model=SimulationRead, status_code=status.HTTP_201_CREATED)

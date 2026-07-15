@@ -48,7 +48,7 @@ export async function applyTemplate(id: string, params: TemplateApplyCreate): Pr
   if (USE_MOCK) {
     const template = await getTemplateById(id);
     if (!template || template.category !== 'scene') throw new Error('该模板不能应用为场景');
-    return { id: `scn-${Date.now()}`, project_id: params.project_id, name: params.name ?? template.title, data: template.data, updated_at: new Date().toISOString() };
+    return { id: `scn-${Date.now()}`, project_id: params.project_id, name: params.name ?? template.title, data: template.data, version: 1, updated_at: new Date().toISOString() };
   }
   return request({ url: apiUrl(`/templates/${id}/apply`), method: 'POST', data: params });
 }

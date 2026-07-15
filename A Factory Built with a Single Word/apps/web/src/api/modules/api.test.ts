@@ -40,6 +40,23 @@ describe('领域 API mock 模式', () => {
     expect(scenario.project_id).toBe(project.id);
     expect(scenario.data).toEqual(template?.data);
   });
+  it('场景校验、自动布局和版本历史在 Mock 模式保持同一契约', async () => {
+    const {
+      autoLayoutScenario,
+      createScenario,
+      getScenarioVersions,
+      validateScenario,
+    } = await import('@/api/modules');
+    const scenario = await createScenario({ project_id: 'project-1', name: 'Scene' });
+    const validation = await validateScenario(scenario.id, scenario.data.components);
+    const layout = await autoLayoutScenario(scenario.id, scenario.data.components);
+    const versions = await getScenarioVersions(scenario.id);
+
+    expect(validation.valid).toBe(true);
+    expect(layout.validation.valid).toBe(true);
+    expect(versions[0].scenario_id).toBe(scenario.id);
+    expect(versions[0].version).toBe(1);
+  });
   it('getSimulation mock 返回运行信息', async () => {
     const { getSimulation } = await import('@/api/modules');
     const run = await getSimulation('mock');

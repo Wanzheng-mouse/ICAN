@@ -1,6 +1,6 @@
 # ICAN 无人仓仿真平台 - API 接口契约
 
-> 最后对齐时间：2026-07-14
+> 最后对齐时间：2026-07-15
 > 以 `services/api/app/main.py` 的 FastAPI 响应字段为唯一事实来源。
 > 前端 DTO 位于 `apps/web/src/api/dtos/backend.ts`，与本文档逐字段一致。
 
@@ -23,6 +23,13 @@
 - 模板详情使用 `TemplateDetailRead`，其中 `data` 是可直接保存的 `ScenarioData`。
 - `POST /api/templates/{id}/apply`（兼容 `/api/v1/templates/{id}/apply`）会校验项目和场景模板，并创建持久化场景；返回的 `scenario.id` 可直接传给编辑器。
 - 首页创建/应用模板后必须同时保存并传递真实 `projectId` 与 `scenarioId`；编辑器刷新时按该 `scenarioId` 重新加载同一场景。
+## 第 3 周冻结范围
+
+- `ScenarioData` 严格包含 `components`、`canvas` 和 `schema_version: "1.0"`；组件字段禁止缺失或携带未声明字段。
+- 场景创建和保存执行 schema、组件 ID、画布边界与矩形重叠校验；独立校验接口返回结构化错误码。
+- 保存使用 `expected_version` 乐观锁。版本不一致返回 HTTP 409 和 `SCENARIO_VERSION_CONFLICT`，成功保存生成不可变版本快照。
+- 自动布局接口只返回重新排布后的 `ScenarioData`，不隐式保存；前端确认布局后再调用保存接口。
+- 编辑器显示服务器版本及保存、校验失败、冲突和网络失败状态。
 ## 2. REST 接口
 
 ### 2.1 健康检查
@@ -80,19 +87,32 @@ ProjectRead {
 
 ```http
 POST /api/v1/scenarios
-Body: { project_id: str, name: str, data?: dict }
-→ ScenarioRead
+Body: { project_id: str, name: str, data?: ScenarioData }
+→ ScenarioRead (201)
 
 GET  /api/v1/scenarios/{id}
 → ScenarioRead
 
 PUT  /api/v1/scenarios/{id}
-Body: { name?: str, data: dict }
+Body: { name?: str, data: ScenarioData, expected_version?: int }
 → ScenarioRead
+→ 409 SCENARIO_VERSION_CONFLICT（expected_version 已过期）
+→ 422 SCENARIO_VALIDATION_FAILED（边界、重叠或组件 ID 校验失败）
+
+POST /api/v1/scenarios/{id}/validate
+Body: { data: dict }
+→ ScenarioValidationRead
+
+POST /api/v1/scenarios/{id}/auto-layout
+Body: { data: ScenarioData }
+→ { data: ScenarioData, validation: ScenarioValidationRead }
+
+GET /api/v1/scenarios/{id}/versions
+→ [ ScenarioVersionRead, ... ]
 
 ScenarioRead {
   id: str, project_id: str, name: str,
-  data: ScenarioData, updated_at: datetime
+  data: ScenarioData, version: int, updated_at: datetime
 }
 
 ScenarioData {
@@ -100,6 +120,18 @@ ScenarioData {
   canvas: { width: number, height: number, scale: number },
   schema_version: "1.0"
 }
+
+ScenarioValidationRead {
+  valid: bool,
+  errors: [{ code, message, component_ids, field? }],
+  warnings: [{ code, message, component_ids, field? }]
+}
+
+校验错误码：
+- SCHEMA_INVALID
+- DUPLICATE_COMPONENT_ID
+- OUT_OF_BOUNDS
+- COMPONENT_OVERLAP
 ```
 
 ### 2.5 仿真（前缀 /api/v1/simulations）
@@ -203,4 +235,4 @@ WS /api/v1/simulations/{id}/stream
 }
 ```
 
-HTTP 状态码：`400`（模板类型不可应用）、`422`（参数校验失败）、`404`（资源不存在）、`500`（服务器错误）。
+HTTP 状态码：`400`（模板类型不可应用）、`404`（资源不存在）、`409`（场景版本冲突）、`422`（schema 或场景业务校验失败）、`500`（服务器错误）。

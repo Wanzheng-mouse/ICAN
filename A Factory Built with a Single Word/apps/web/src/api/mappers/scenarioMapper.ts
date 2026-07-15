@@ -10,20 +10,20 @@ import type { SceneComponent } from '@ican/contracts';
 
 /** 后端 ScenarioRead → 前端 SceneComponent[] */
 export function scenarioReadToComponents(read: ScenarioRead): SceneComponent[] {
-  const components = read.data?.components as SceneComponent[] | undefined;
-  return components ?? [];
+  return read.data.components;
 }
 
 /** 后端 ScenarioRead → 前端 canvas 尺寸 */
 export function scenarioReadToCanvas(read: ScenarioRead): { width: number; height: number; scale: number } {
-  const c = read.data?.canvas as { width?: number; height?: number; scale?: number } | undefined;
-  return { width: c?.width ?? 1200, height: c?.height ?? 800, scale: c?.scale ?? 1 };
+  const { canvas } = read.data;
+  return { width: canvas.width, height: canvas.height, scale: canvas.scale };
 }
 
 /** 前端 SceneComponent[] + canvas → 后端 ScenarioUpdate */
 export function editorComponentsToScenarioUpdate(
   components: SceneComponent[],
   canvas?: { width: number; height: number; scale: number },
+  expectedVersion?: number,
 ): ScenarioUpdate {
   return {
     data: {
@@ -31,6 +31,7 @@ export function editorComponentsToScenarioUpdate(
       canvas: canvas ?? { width: 1200, height: 800, scale: 1 },
       schema_version: '1.0',
     },
+    expected_version: expectedVersion,
   };
 }
 
