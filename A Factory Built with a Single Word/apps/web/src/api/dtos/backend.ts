@@ -99,15 +99,67 @@ export interface ScenarioVersionRead {
   created_at: string;
 }
 // ===== Simulation =====
+export interface SimulationRobotRead {
+  id: string;
+  name: string;
+  state: 'idle' | 'moving' | 'moving_to_charge' | 'charging';
+  battery: number;
+  position: { x: number; y: number };
+  path: Array<{ x: number; y: number }>;
+  path_index: number;
+  current_task_id?: string | null;
+  completed_tasks: number;
+  wait_ticks: number;
+}
+
+export interface SimulationTaskRead {
+  id: string;
+  status: 'pending' | 'running' | 'completed';
+  priority: 'high' | 'normal' | 'low';
+  pickup: { x: number; y: number };
+  dropoff: { x: number; y: number };
+  assigned_robot_id?: string | null;
+  progress: number;
+}
+
+export interface SimulationEventRead {
+  id: string;
+  type: string;
+  level: 'info' | 'warn' | 'error' | 'success';
+  time: string;
+  message: string;
+  source: string;
+  data: Record<string, unknown>;
+}
+
 export interface SimulationRead {
   id: string;
   project_id: string;
   scenario_id: string;
-  status: string;
-  config: Record<string, unknown>;   // { robot_count, order_count }
-  metrics: Record<string, unknown>;  // { completion_rate, average_duration, congestion_count, energy }
-  events: Array<Record<string, unknown>>;  // [{ type, description, severity }]
+  status: 'created' | 'running' | 'paused' | 'stopped' | 'finished';
+  config: { robot_count: number; order_count: number; random_seed: number; engine_version?: string };
+  metrics: Record<string, number>;
+  events: SimulationEventRead[];
+  robots: SimulationRobotRead[];
+  tasks: SimulationTaskRead[];
+  sim_time: number;
   created_at: string;
+}
+
+export interface SimulationTickMessage {
+  type: 'simulation_tick';
+  run_id: string;
+  time: number;
+  robots: SimulationRobotRead[];
+  tasks: SimulationTaskRead[];
+  events: SimulationEventRead[];
+  metrics: Record<string, number>;
+}
+
+export interface SimulationEventMessage {
+  type: 'simulation_event';
+  run_id: string;
+  event: SimulationEventRead;
 }
 
 export interface SimulationCreate {
@@ -115,6 +167,7 @@ export interface SimulationCreate {
   scenario_id: string;
   robot_count?: number;
   order_count?: number;
+  random_seed?: number;
 }
 
 export interface SimulationControl {
@@ -122,7 +175,7 @@ export interface SimulationControl {
 }
 
 export interface AnomalyCreate {
-  type: 'road_closed' | 'low_battery' | 'order_surge';
+  type: 'road_closed' | 'low_battery' | 'order_surge' | 'station_down';
   description?: string;
 }
 

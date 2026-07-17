@@ -2,61 +2,39 @@
 
 > A Factory Built with a Single Word · 一言造厂
 
-ICAN 是一个面向无人仓规划、仿真和方案进化的 Web 平台。用户可以从模板或自然语言需求创建项目，在二维编辑器中调整仓库场景，启动 AGV 仿真、注入异常，并查看优化结果与报告。
+ICAN 用于从仓库场景设计到 AGV 仿真、异常推演和方案进化。当前已完成项目、场景编辑和第 4 周可恢复实时仿真闭环。
 
 ## 当前实现状态
 
 | 模块 | 当前能力 | 数据来源 |
 | --- | --- | --- |
-| 首页与项目 | 模板列表/详情、创建项目、应用场景模板 | Mock 或真实 API |
-| 场景编辑器 | 场景读取、画布编辑、校验、自动布局、乐观锁保存、版本历史 | Mock 或真实 API |
-| 仿真 | 创建运行、开始/暂停/停止、异常注入、WebSocket 状态流 | 基础真实 API；agents/events 仅 Mock 模式可用 |
-| 方案进化 | 根据仿真生成诊断和优化指标 | 基础真实 API；趋势仅 Mock 模式可用 |
-| 报告 | 下载 PDF 占位报告 | 图表仅 Mock 模式可用；后端仅提供 PDF 端点 |
-| 认证、资源、编排 | 前端演示流程 | 认证始终为前端 Mock；资源/编排仅 Mock 模式可用 |
+| 项目与模板 | 模板列表/应用、项目创建与场景持久化 | Mock 或真实 API |
+| 场景编辑器 | 校验、自动布局、乐观锁保存、版本历史 | Mock 或真实 API |
+| 仿真（第 4 周） | 创建真实运行 ID、10 AGV/20 订单、调度、路径、充电、拥堵、异常、事件与实时流 | Mock 或真实 API（可按模块切换） |
+| 方案进化 | 基于运行指标生成诊断和优化指标 | 基础真实 API |
+| 报告与其余演示页面 | PDF 占位下载、图表/认证等演示流程 | 部分 Mock |
 
-第 1–3 周的前后端场景闭环已完成：项目创建 → 模板应用 → 场景编辑 → 校验/自动布局 → 带版本号保存。
+## 第 4 周后端与仿真交付
 
-## 技术栈
-
-- 前端：React 18、TypeScript、Vite、Ant Design、TanStack Query、Zustand、Konva、ECharts
-- 后端：FastAPI、Pydantic、SQLAlchemy、SQLite
-- 仿真：当前为可运行的确定性 MVP 服务，预留 SimPy、NetworkX 与 A* 扩展位置
-- 工程：npm workspaces；Python 后端使用独立虚拟环境
-
-## 目录结构
-
-```text
-A Factory Built with a Single Word/
-├─ apps/web/                 # React 前端
-├─ packages/contracts/       # 前端共享 TypeScript 类型
-├─ packages/mock-data/       # 前端演示数据
-├─ services/api/             # FastAPI、SQLite 与仿真/进化 MVP
-├─ scenarios/                # 生成的场景文件目录
-├─ reports/                  # 生成的报告文件目录
-├─ docs/                     # 契约、开发与阶段文档
-├─ package.json              # npm workspace 命令
-└─ README.md
-```
+- SimPy 驱动、可持久化的运行状态；默认创建 **10 台 AGV、20 个订单**。
+- 任务分配、曼哈顿路径与道路封闭后的绕行、路径预约拥堵、低电量充电和订单完成指标。
+- REST：创建、查询、开始/暂停/停止、异常注入、事件历史、三类智能体状态。
+- WebSocket：初始快照、每秒 tick、单条事件、完成通知和 `ping`/`pong`。
+- 前端编辑器会先创建真实 `simulationId`；仿真页用 REST 恢复快照并自动重连实时流。
 
 ## 快速开始
 
-环境要求：Node.js 18+（推荐 20+）、npm 8+、Python 3.10+。
-
-### 1. 启动后端
+环境：Node.js 18+、npm 8+、Python 3.10+。
 
 ```powershell
 cd "A Factory Built with a Single Word/services/api"
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-Copy-Item .env.example .env
 python -m uvicorn app.main:app --reload --port 8000
 ```
 
-启动后可访问健康检查 <http://localhost:8000/health>、Swagger <http://localhost:8000/docs> 和 OpenAPI <http://localhost:8000/openapi.json>。SQLite 数据库默认生成在 `services/api/ican.db`，该本地文件已被 Git 忽略。
-
-### 2. 启动前端
+另开终端：
 
 ```powershell
 cd "A Factory Built with a Single Word"
@@ -64,57 +42,43 @@ npm install
 npm run dev
 ```
 
-默认开发配置 `VITE_USE_MOCK=true`，无需后端也能演示。若要联调真实后端，请新建不提交到 Git 的 `apps/web/.env.local`：
+默认 `VITE_USE_MOCK=true`，可以不用后端展示页面。要只让仿真模块走真实服务，创建不提交的 `apps/web/.env.local`：
 
 ```dotenv
 VITE_BACKEND_URL=http://localhost:8000
 VITE_WS_URL=ws://localhost:8000
-VITE_USE_MOCK=false
+VITE_USE_MOCK=true
+VITE_USE_SIMULATION_MOCK=false
 ```
 
-修改环境变量后需要重启 Vite，再访问 <http://localhost:5173>。演示账号：`admin / ican2026`（认证当前仍为前端 Mock）。完整步骤见[本地开发与联调指南](./docs/local-development.md)。
+这会保持其他未接入模块的 Mock 数据，同时把编辑器创建运行和仿真页面切到真实 API。修改环境变量后重启 Vite。
 
-## 验证命令
-
-前端（项目根目录）：
+## 验证
 
 ```powershell
+# 前端
 cd apps/web
 npx vitest run --testTimeout=15000
+npx tsc --noEmit
 cd ../..
-npm run typecheck
 npm run lint
 npm run build
-```
 
-后端（`services/api`，激活虚拟环境后）：
-
-```powershell
+# 后端（services/api）
 python -m pytest tests -q
 ```
 
-## 前后端契约
-
-- API 基地址：`http://localhost:8000`
-- 业务 API 前缀：`/api/v1`；模板兼容前缀：`/api/templates`
-- 仿真流：`ws://localhost:8000/api/v1/simulations/{simulation_id}/stream`
-- 场景结构版本：`schema_version: "1.0"`
-- 场景保存应携带 `expected_version`；版本过期返回 HTTP 409
-
-字段、错误码及未实现的真实接口以 [API 接口契约](./docs/api-contract.md) 为准。
-
 ## 文档
 
-- [文档索引](./docs/README.md)
-- [本地开发与联调指南](./docs/local-development.md)
-- [前端开发指南](./docs/web-dev-guide.md)
+- [本地开发与联调](./docs/local-development.md)
 - [API 接口契约](./docs/api-contract.md)
-- [项目总开发方案](./ICAN-无人仓仿真决策平台开发方案.md)
-- [阶段 1 历史总结](./docs/stage-1-summary.md)
+- [第 4 周仿真说明](./docs/simulation-week4.md)
+- [前端开发指南](./docs/web-dev-guide.md)
+- [API 服务 README](./services/api/README.md)
+- [总开发方案](./ICAN-无人仓仿真决策平台开发方案.md)
 
 ## 当前边界
 
-- 后端认证、文件上传、资源中心和任务编排尚未实现；真实模式下不要进入未接入页面，需要演示时切回 Mock 模式。
-- 后端仿真目前提供运行级状态和 WebSocket tick，不提供独立 agents/events 列表接口。
-- 进化趋势和报告图表接口尚未实现；PDF 下载返回 MVP 占位内容。
-- `services/api/app/main.py` 是后端契约事实来源；前端 DTO 位于 `apps/web/src/api/dtos/backend.ts`。
+- 认证、资源中心、任务编排和报告图表仍未接入真实后端。
+- 运行时状态保存在 SQLite 的 `SimulationRun.config.runtime` 中，适用于 MVP 单实例；多实例部署需迁移到共享状态/任务队列。
+- PDF 端点是占位文本响应，不是正式排版报告。

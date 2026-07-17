@@ -26,6 +26,7 @@ import {
   useAutoLayoutScenario,
   useScenario,
   useSaveScenario,
+  createSimulation,
 } from '@/api/modules';
 import { useAppStore } from '@/stores/useAppStore';
 import {
@@ -99,6 +100,7 @@ export default function Editor() {
   const { data: serverData, isLoading, isError } = useScenario(scenarioId ?? '');
   const saveMutation = useSaveScenario(scenarioId ?? '');
   const autoLayoutMutation = useAutoLayoutScenario(scenarioId ?? '');
+  const [creatingSimulation, setCreatingSimulation] = useState(false);
 
   const [components, setComponents] = useState<SceneComponent[]>(initialComponents);
   // 历史栈：past 是可 undo 的快照，future 是可 redo 的快照
@@ -370,13 +372,26 @@ export default function Editor() {
     });
   };
 
-  const handleEnterSim = () => {
-    if (saveStatus === 'dirty') {
+  const handleEnterSim = async () => {
+    if (!projectId || !scenarioId) {
+      message.warning('缺少项目或场景 ID，无法创建真实仿真');
+      return;
+    }
+    if (saveStatus !== 'saved') {
       message.warning('请先保存草稿');
       return;
     }
-    message.success('正在进入仿真...');
-    setTimeout(() => navigate(`/simulation?projectId=${projectId ?? ''}&scenarioId=${scenarioId ?? ''}`), 600);
+    setCreatingSimulation(true);
+    try {
+      const run = await createSimulation({ project_id: projectId, scenario_id: scenarioId, robot_count: 10, order_count: 20 });
+      setProjectContext({ projectId, scenarioId, simulationId: run.id });
+      message.success('已创建 10 台 AGV、20 个订单的真实仿真');
+      navigate(`/simulation?projectId=${projectId}&scenarioId=${scenarioId}&simulationId=${run.id}`);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '创建仿真失败，请重试');
+    } finally {
+      setCreatingSimulation(false);
+    }
   };
 
   const handleAddComponent = (category: string, name: string) => {
@@ -442,7 +457,7 @@ export default function Editor() {
           <Button icon={<ReloadOutlined />} onClick={handleReload}>重新加载</Button>
           <Button icon={<ThunderboltOutlined />} onClick={handleAutoLayout} loading={autoLayoutMutation.isPending}>自动生成布局</Button>
           <Button icon={<SaveOutlined />} onClick={handleSave} loading={saveStatus === 'saving'}>保存草稿</Button>
-          <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleEnterSim}>进入仿真</Button>
+          <Button type="primary" icon={<PlayCircleOutlined />} loading={creatingSimulation} onClick={handleEnterSim}>进入仿真</Button>
         </div>
       </div>
 

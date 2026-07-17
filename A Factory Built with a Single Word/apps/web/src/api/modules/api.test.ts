@@ -94,16 +94,16 @@ describe('领域 API mock 模式', () => {
     expect(a.length).toBe(b.length);
   });
 
-  it('controlSimulation 在 mock 模式下立即返回', async () => {
+  it('controlSimulation 在 mock 模式下返回更新后的运行快照', async () => {
     const { controlSimulation } = await import('@/api/modules');
-    await expect(controlSimulation('mock', 'start')).resolves.toBeUndefined();
-    await expect(controlSimulation('mock', 'pause')).resolves.toBeUndefined();
-    await expect(controlSimulation('mock', 'stop')).resolves.toBeUndefined();
+    await expect(controlSimulation('mock', 'start')).resolves.toMatchObject({ status: 'running' });
+    await expect(controlSimulation('mock', 'pause')).resolves.toMatchObject({ status: 'paused' });
+    await expect(controlSimulation('mock', 'stop')).resolves.toMatchObject({ status: 'stopped' });
   });
 
-  it('injectAnomaly 在 mock 模式下立即返回', async () => {
+  it('injectAnomaly 在 mock 模式下返回运行快照', async () => {
     const { injectAnomaly } = await import('@/api/modules');
-    await expect(injectAnomaly('mock', 'road_closed')).resolves.toBeUndefined();
+    await expect(injectAnomaly('mock', 'road_closed')).resolves.toMatchObject({ id: 'mock' });
   });
 });
 
