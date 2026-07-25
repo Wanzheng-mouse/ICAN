@@ -1,91 +1,64 @@
 # ICAN 前端开发指南
 
-## 1. 环境与命令
+## 环境与命令
 
-- Node.js 18+（推荐 20+）
-- npm 8+
-
-在项目根目录运行：
+Node.js 18+。在项目根目录安装依赖并启动：
 
 ```powershell
 npm install
 npm run dev
 cd apps/web
 npx vitest run --testTimeout=15000
+npx tsc --noEmit
 cd ../..
-npm run typecheck
 npm run lint
 npm run build
 ```
 
-Vite 默认地址为 <http://localhost:5173>，生产预览可在 `apps/web` 中运行 `npm run preview`（端口 4173）。
-
-## 2. 目录结构
+## 目录与数据层
 
 ```text
 apps/web/src/
-├─ api/
-│  ├─ client.ts             # Axios、Token 与统一错误处理
-│  ├─ dtos/backend.ts       # 与 Pydantic 对齐的后端 DTO
-│  ├─ mappers/              # 后端 DTO → 页面领域模型
-│  ├─ modules/              # 项目/场景/仿真/进化等领域 API
-│  ├─ queryClient.ts        # TanStack Query 配置
-│  └─ ws.ts                 # WebSocket 客户端
-├─ components/              # 通用组件
-├─ layouts/                 # 页面布局
-├─ pages/                   # 页面与业务交互
-├─ stores/                  # Zustand 状态和项目上下文
-├─ styles/                  # 主题与全局样式
-├─ utils/                   # URL、场景编辑和仿真工具
-├─ App.tsx
-├─ main.tsx
-└─ routes.tsx
+├─ api/client.ts                 # Axios、统一错误处理和全局 Mock 开关
+├─ api/dtos/backend.ts           # 与 FastAPI Pydantic 对齐的 DTO
+├─ api/modules/simulationApi.ts  # 仿真 REST、React Query 与实时流 hooks
+├─ api/ws.ts                     # 自动重连与 ping/pong 心跳客户端
+├─ pages/Editor                  # 保存场景后创建真实 simulationId
+├─ pages/Simulation              # 快照恢复、实时状态、异常和智能体
+└─ stores/useAppStore.ts         # projectId/scenarioId/simulationId 持久化上下文
 ```
 
-共享类型在 `packages/contracts/src/`，演示数据在 `packages/mock-data/src/`。修改 Mock 结构时同步核对共享类型和 Mapper。
+页面只使用 `api/modules` 导出的函数或 hooks；不要在页面中直接拼接接口地址。后端字段先写入 `backend.ts`，再由 mapper 转成页面领域模型。
 
-## 3. Mock 与真实后端
+## 第 4 周仿真数据流
 
-`apps/web/.env.development` 默认使用 Mock。真实联调时新建 `apps/web/.env.local` 并设置 `VITE_USE_MOCK=false`，不要提交个人环境配置。环境变量只在 Vite 启动时读取，修改后必须重启。
+1. 编辑器校验并保存场景后调用 `createSimulation`。
+2. 返回的真实 `simulationId` 写入 URL 与 Zustand。
+3. 仿真页读取 `GET /simulations/{id}` 快照，并查询 events/agents。
+4. `useSimulationStream` 接收 tick、事件与完成消息；断线后 `WsClient` 重连，连接成功时失效快照缓存。
+5. 控制和异常 mutation 成功后直接更新运行快照，并刷新事件缓存。
 
-当前真实闭环：模板列表/详情/应用、项目创建/列表/详情、场景创建/读取/校验/自动布局/保存/版本历史、仿真创建/读取/控制/异常注入/WebSocket tick、进化创建/读取和 PDF 占位报告下载。
+服务端心跳为 `{ type: "ping" }` → `{ type: "pong" }`。不要把前端动画或 Mock ID 当作真实运行状态。
 
-当前仅在 Mock 模式可完整演示：资源中心、任务编排、仿真 agents/events 列表、进化趋势和报告图表。认证、用户资料、搜索和通知始终使用前端本地实现。由于 `VITE_USE_MOCK` 是全局开关，真实模式下进入未接入页面会请求不存在的后端接口。
+## 模块级 Mock
 
-## 4. API 分层规则
+全局 `VITE_USE_MOCK` 仍控制大多数页面。仿真模块额外支持 `VITE_USE_SIMULATION_MOCK`：
 
-1. 页面只调用 `api/modules` 导出的函数或 hooks，不直接拼 URL。
-2. URL 通过 `utils/apiUrl.ts` 生成；模板和健康检查走 `/api`，其余默认走 `/api/v1`。
-3. 后端响应先在 `api/dtos/backend.ts` 建模，再由 `api/mappers` 转为页面领域类型。
-4. TanStack Query key 必须包含领域和资源 ID；写操作成功后更新或失效相关缓存。
-5. 新增真实接口时保留可控的 Mock 分支，并为两种模式补充测试。
-
-场景编辑器需要完整保留服务器的 `components`、`canvas`、`schema_version` 和 `version`；保存携带 `expected_version`，分别处理 409、422 和网络错误；自动布局只更新本地状态，保存后才持久化。
-
-## 5. 路由与登录
-
-公开路由：`/login`、`/register`、`/forgot-password`。其余页面由 `RequireAuth` 保护。
-
-认证当前为前端 Mock，演示账号是 `admin / ican2026`。`VITE_USE_MOCK=false` 会使使用 `USE_MOCK` 的领域模块转向真实 API，但认证仍不会切换到后端；真实联调时只访问上文列出的已接入模块。
-
-## 6. 命名与提交规范
-
-- React 组件和组件目录：PascalCase
-- 普通函数/变量：camelCase；常量：UPPER_SNAKE_CASE
-- 组件文件优先 `.tsx`，纯逻辑和类型使用 `.ts`
-- 测试文件与被测模块相邻，命名为 `*.test.ts` 或 `*.test.tsx`
-
-```text
-feat(web): 接入场景版本历史
-fix(web): 修复场景保存冲突提示
-docs: 更新前后端联调说明
-test(web): 补充场景 Mapper 测试
+```dotenv
+# apps/web/.env.local（不要提交）
+VITE_BACKEND_URL=http://localhost:8000
+VITE_WS_URL=ws://localhost:8000
+VITE_USE_MOCK=true
+VITE_USE_SIMULATION_MOCK=false
 ```
 
-## 7. 联调与排错
+推荐该组合用于第 4 周联调：其余未接入页面继续使用演示数据，编辑器创建运行和仿真页改走真实后端。若未设置 `VITE_USE_SIMULATION_MOCK`，它继承全局开关。修改环境变量后重启 Vite。
 
-- 先访问后端 `/health`，再排查 Vite 或页面请求。
-- 在浏览器 Network 中确认 URL、HTTP 状态和响应 `detail`。
-- WebSocket 路径为 `/api/v1/simulations/{id}/stream`。
-- 场景 409 表示版本已过期，应重新加载；422 表示 schema 或布局校验失败。
-- 完整步骤见[本地开发与联调指南](./local-development.md)。
+## 约定
+
+- Query key 必须包含资源 ID；写操作成功后更新或失效对应缓存。
+- 场景保存携带 `expected_version`，分别显示 409 冲突、422 校验错误和网络错误。
+- 运行 ID 必须来自后端 `POST /simulations`，不能用本地时间戳代替真实模式的 ID。
+- 新增真实接口时，同步修改 DTO、API 模块、[接口契约](./api-contract.md) 和测试。
+
+认证、资源、编排、进化趋势和报告图表仍以 Mock 为主。完整启动和排错见[本地开发与联调指南](./local-development.md)。
