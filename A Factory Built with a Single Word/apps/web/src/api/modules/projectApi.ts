@@ -54,6 +54,14 @@ export function useProjectWorkspace(id: string): UseQueryResult<ProjectWorkspace
   return useQuery({ queryKey: ['project-workspace', id], queryFn: () => getProjectWorkspace(id), enabled: Boolean(id) });
 }
 
+export async function deleteProjectFile(projectId: string, fileId: string): Promise<void> {
+  return request({ url: apiUrl(`/projects/${projectId}/files/${fileId}`), method: 'DELETE' });
+}
+
+export async function downloadProjectFile(file: { download_url: string }): Promise<Response> {
+  return request({ url: file.download_url, method: 'GET' });
+}
+
 export const homeStaticData = {
   features: mockFeatures as FeatureItem[],
   steps: mockSteps as GenerationStep[],
