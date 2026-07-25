@@ -13,6 +13,7 @@
  */
 
 const API_PREFIX = import.meta.env.VITE_API_PREFIX ?? '/api/v1';
+export const apiPrefix = API_PREFIX;
 
 /** 走 /api 前缀（而非 /api/v1）的路径 */
 const TWO_PREFIX: string[] = ['/templates', '/health'];
