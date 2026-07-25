@@ -102,3 +102,7 @@ reports/*.csv
 Thumbs.db
 Desktop.ini
 $RECYCLE.BIN/
+
+uploads/
+# PowerShell null redirect artifact
+\
