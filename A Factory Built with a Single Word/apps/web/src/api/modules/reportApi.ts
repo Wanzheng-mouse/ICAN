@@ -82,3 +82,7 @@ export const useReportDeviceUsages: Hook<DeviceUsage[]> =
   (id) => useQuery({ queryKey: ['report', id ?? 'mock', 'devices'], queryFn: () => getReportDeviceUsages(id ?? 'mock') });
 export const useReportLogPlayback: Hook<typeof mockPlayback> =
   (id) => useQuery({ queryKey: ['report', id ?? 'mock', 'playback'], queryFn: () => getReportLogPlayback(id ?? 'mock') });
+
+export async function downloadReportPdf(simulationId: string): Promise<Blob> {
+  return request({ url: apiUrl(`/reports/${simulationId}/pdf`), responseType: 'blob' });
+}

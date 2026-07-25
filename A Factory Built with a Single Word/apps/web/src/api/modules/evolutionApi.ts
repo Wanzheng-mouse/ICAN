@@ -12,7 +12,7 @@ import { evolutionReport as mockReport, evolutionTrend as mockTrend } from '@ica
 import { evolutionReadToReport } from '@/api/mappers/evolutionMapper';
 
 import type { EvolutionReport } from '@ican/contracts';
-import type { EvolutionRead, EvolutionCreate } from '@/api/dtos/backend';
+import type { EvolutionApplyRead, EvolutionRead, EvolutionCreate } from '@/api/dtos/backend';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type EvolutionTrendPoint = any;
@@ -41,4 +41,16 @@ export function useEvolutionReport(id?: string): UseQueryResult<EvolutionReport>
 }
 export function useEvolutionTrend(id?: string): UseQueryResult<EvolutionTrendPoint[]> {
   return useQuery({ queryKey: ['evolution', id ?? 'mock', 'trend'], queryFn: () => getEvolutionTrend(id ?? 'mock') });
+}
+
+export async function getEvolution(id: string): Promise<EvolutionRead> {
+  return request({ url: apiUrl(`/evolutions/${id}`) });
+}
+
+export async function applyEvolution(id: string): Promise<EvolutionApplyRead> {
+  return request({ url: apiUrl(`/evolutions/${id}/apply`), method: 'POST' });
+}
+
+export function useEvolution(id?: string): UseQueryResult<EvolutionRead> {
+  return useQuery({ queryKey: ['evolution', id], queryFn: () => getEvolution(id!), enabled: Boolean(id) });
 }
