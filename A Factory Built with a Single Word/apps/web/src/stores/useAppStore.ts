@@ -27,6 +27,7 @@ interface AppState {
   currentScenarioId: string | null;
   currentSimulationId: string | null;
   currentEvolutionId: string | null;
+  simulationConnectionState: 'idle' | 'connected' | 'reconnecting' | 'error';
 
   login: (user: UserInfo, token: string, remember?: boolean) => void;
   logout: () => void;
@@ -34,6 +35,7 @@ interface AppState {
 
   setProjectContext: (ctx: { projectId?: string; scenarioId?: string; simulationId?: string; evolutionId?: string }) => void;
   clearProjectContext: () => void;
+  setSimulationConnectionState: (state: 'idle' | 'connected' | 'reconnecting' | 'error') => void;
   updatePreferences: (p: Partial<NonNullable<UserInfo['preferences']>>) => void;
 }
 
@@ -57,6 +59,7 @@ export const useAppStore = create<AppState>()(
       currentScenarioId: null,
       currentSimulationId: null,
       currentEvolutionId: null,
+      simulationConnectionState: 'idle',
 
       login: (user, token, remember = false) =>
         set((state) => {
@@ -101,6 +104,8 @@ export const useAppStore = create<AppState>()(
           currentSimulationId: null,
           currentEvolutionId: null,
         }),
+
+      setSimulationConnectionState: (state) => set({ simulationConnectionState: state }),
 
       updatePreferences: (p) =>
         set((s) => {
