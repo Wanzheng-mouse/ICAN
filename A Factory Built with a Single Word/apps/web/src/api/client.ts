@@ -1,5 +1,9 @@
-import axios, { type AxiosError, type AxiosInstance, type AxiosRequestConfig, type InternalAxiosRequestConfig } from 'axios';
-import { message } from 'antd';
+import axios, {
+  type AxiosError,
+  type AxiosInstance,
+  type AxiosRequestConfig,
+  type InternalAxiosRequestConfig,
+} from 'axios';
 import { useAppStore } from '@/stores/useAppStore';
 
 const BASE_URL = import.meta.env.VITE_BACKEND_URL || '';
@@ -31,27 +35,31 @@ client.interceptors.request.use(
 client.interceptors.response.use(
   (response) => {
     const body = response.data;
-    if (body && typeof body === 'object' && 'code' in body) {
-      if (body.code !== 0 && body.code !== 200) {
-        message.error(body.message || '请求失败');
-        return Promise.reject(new Error(body.message));
+    const isSuccessEnvelope = Boolean(
+      body &&
+        typeof body === 'object' &&
+        'code' in body &&
+        'message' in body &&
+        'data' in body,
+    );
+    if (isSuccessEnvelope) {
+      const envelope = body as ApiResponse;
+      if (envelope.code !== 0 && envelope.code !== 200) {
+        return Promise.reject(new Error(envelope.message));
       }
-      return body.data;
+      return envelope.data;
     }
     return body;
   },
-  (error: AxiosError<{ message?: string }>) => {
+  (error: AxiosError<{ message?: string; detail?: string | { message?: string } }>) => {
     const status = error.response?.status;
-    const msg = error.response?.data?.message || error.message;
     if (status === 401) {
-      message.error('登录已过期，请重新登录');
-      useAppStore.getState().logout();
+      if (useAppStore.getState().token) {
+        showToast('error', '登录已过期，请重新登录');
+        useAppStore.getState().logout();
+      }
     } else if (status === 403) {
-      message.error('没有权限');
-    } else if (status && status >= 500) {
-      message.error('服务器错误，请稍后重试');
-    } else if (!USE_MOCK) {
-      message.error(msg || '网络异常');
+      showToast('error', '没有权限');
     }
     return Promise.reject(error);
   },
