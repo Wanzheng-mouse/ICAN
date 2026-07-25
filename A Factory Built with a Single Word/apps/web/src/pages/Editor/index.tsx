@@ -1,87 +1,106 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlignCenterOutlined,
-  ColumnHeightOutlined,
+  CheckCircleOutlined,
   DeleteOutlined,
   DragOutlined,
+  ExclamationCircleOutlined,
+  FolderOpenOutlined,
+  HistoryOutlined,
+  HomeOutlined,
+  PlusOutlined,
   PlayCircleOutlined,
   RedoOutlined,
   ReloadOutlined,
   SaveOutlined,
   SelectOutlined,
-  TagsOutlined,
   ThunderboltOutlined,
   UndoOutlined,
   ZoomInOutlined,
   ZoomOutOutlined,
 } from '@ant-design/icons';
-import { App, Button, Dropdown, Input, InputNumber, Modal, Select, Tabs, Tag } from 'antd';
+import {
+  Alert,
+  App,
+  Button,
+  Drawer,
+  Dropdown,
+  Empty,
+  Input,
+  InputNumber,
+  List,
+  Modal,
+  Select,
+  Skeleton,
+  Space,
+  Tabs,
+  Tag,
+  Tooltip,
+} from 'antd';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { SectionCard } from '@/components';
 import type { SceneComponent } from '@ican/contracts';
-import type { ScenarioData } from '@/api/dtos/backend';
+import type {
+  ScenarioData,
+  ScenarioRead,
+  ScenarioValidationRead,
+  ScenarioVersionRead,
+} from '@/api/dtos/backend';
 import {
   ScenarioConflictError,
   ScenarioValidationError,
   useAutoLayoutScenario,
-  useScenario,
+  useCreateSimulation,
   useSaveScenario,
+  useScenario,
+  useScenarioVersions,
+  validateScenario,
 } from '@/api/modules';
+import { scenarioReadToEditorState } from '@/api/mappers/scenarioMapper';
+import { getApiErrorMessage } from '@/api/errorMessage';
+
+import { ProjectContextBar } from '@/components';
 import { useAppStore } from '@/stores/useAppStore';
+import { useCan } from '@/utils/roleGuard';
 import {
-  editorComponentLibrary,
-  editorOperationLogs,
-  editorOverview,
-  editorSceneRules,
-  editorTools,
-} from '@ican/mock-data';
+  clampComponentToCanvas,
+  cloneComponents,
+  createSceneComponent,
+  DEFAULT_SCENARIO_CANVAS,
+  isFormInteractionTarget,
+  sceneOverview,
+  validateSceneLocally,
+} from '@/utils/sceneEditor';
+import { editorComponentLibrary } from '@/config/editorCatalog';
 import './index.css';
 
-const toolIconMap: Record<string, React.ReactNode> = {
-  SelectOutlined: <SelectOutlined />,
-  DragOutlined: <DragOutlined />,
-  ReloadOutlined: <ReloadOutlined />,
-  DeleteOutlined: <DeleteOutlined />,
-  AlignCenterOutlined: <AlignCenterOutlined />,
-  TagsOutlined: <TagsOutlined />,
-  ColumnHeightOutlined: <ColumnHeightOutlined />,
-};
+type EditorTool = 'select' | 'move' | 'delete';
+type SaveStatus = 'saved' | 'dirty' | 'saving' | 'conflict' | 'invalid' | 'error';
+type PropertyTab = 'properties' | 'validation';
 
-const colorMap: Record<string, string> = {
-  shelf: '#3b82f6',
-  agv: '#06b6d4',
-  arm: '#a855f7',
-  conveyor: '#22c55e',
-  station: '#f59e0b',
-  charger: '#10b981',
-  obstacle: '#64748b',
-};
-
-const initialComponents: SceneComponent[] = [
-  { id: 'shelf-A1', type: 'shelf', name: 'A 区货架 - 01', x: 200, y: 200, width: 240, height: 80, rotation: 0, properties: { zone: 'A', doubleSided: true, capacity: 200 } },
-  { id: 'shelf-A2', type: 'shelf', name: 'A 区货架 - 02', x: 460, y: 200, width: 240, height: 80, rotation: 0, properties: { zone: 'A', doubleSided: true, capacity: 200 } },
-  { id: 'shelf-A3', type: 'shelf', name: 'A 区货架 - 03', x: 200, y: 320, width: 240, height: 80, rotation: 0, properties: { zone: 'A', doubleSided: true, capacity: 200 } },
-  { id: 'shelf-B1', type: 'shelf', name: 'B 区货架 - 01', x: 760, y: 200, width: 240, height: 80, rotation: 0, properties: { zone: 'B', doubleSided: true, capacity: 200 } },
-  { id: 'shelf-C1', type: 'shelf', name: 'C 区货架 - 01', x: 200, y: 460, width: 240, height: 80, rotation: 0, properties: { zone: 'C', doubleSided: true, capacity: 200 } },
-  { id: 'shelf-D1', type: 'shelf', name: 'D 区货架 - 01', x: 760, y: 460, width: 240, height: 80, rotation: 0, properties: { zone: 'D', doubleSided: true, capacity: 200 } },
-  { id: 'station-pick-1', type: 'station', name: '拣选工作站 - 01', x: 400, y: 130, width: 80, height: 50, rotation: 0, properties: { type: 'pick' } },
-  { id: 'station-pack-1', type: 'station', name: '包装工作站 - 01', x: 600, y: 130, width: 80, height: 50, rotation: 0, properties: { type: 'pack' } },
-  { id: 'arm-1', type: 'arm', name: '机械臂 - 01', x: 530, y: 280, width: 40, height: 40, rotation: 0, properties: {} },
-  { id: 'charger-1', type: 'charger', name: '充电桩 - 01', x: 480, y: 580, width: 30, height: 30, rotation: 0, properties: {} },
-  { id: 'charger-2', type: 'charger', name: '充电桩 - 02', x: 540, y: 580, width: 30, height: 30, rotation: 0, properties: {} },
-  { id: 'agv-1', type: 'agv', name: 'AGV-001', x: 380, y: 400, width: 24, height: 16, rotation: 0, properties: { battery: 85 } },
-  { id: 'agv-2', type: 'agv', name: 'AGV-002', x: 620, y: 400, width: 24, height: 16, rotation: 0, properties: { battery: 62 } },
-];
+interface OperationLog {
+  time: string;
+  action: string;
+  target?: string;
+  details?: string;
+}
 
 const HISTORY_LIMIT = 30;
-type SaveStatus = 'saved' | 'dirty' | 'saving' | 'conflict' | 'invalid' | 'error';
-
+const colorMap: Record<SceneComponent['type'], string> = {
+  shelf: '#3b82f6', agv: '#06b6d4', arm: '#a855f7', conveyor: '#22c55e',
+  station: '#f59e0b', charger: '#10b981', obstacle: '#64748b',
+};
+const iconMap: Record<SceneComponent['type'], string> = {
+  shelf: '▤', agv: '◆', arm: '●', conveyor: '⇢', station: '▣', charger: 'ϟ', obstacle: '▰',
+};
+const typeLabels: Record<SceneComponent['type'], string> = {
+  shelf: '货架', agv: 'AGV', arm: '机械臂', conveyor: '输送线', station: '工作站', charger: '充电桩', obstacle: '障碍物',
+};
 const saveStatusMeta: Record<SaveStatus, { color: string; text: string }> = {
   saved: { color: 'success', text: '已保存' },
-  dirty: { color: 'warning', text: '未保存' },
-  saving: { color: 'processing', text: '保存中...' },
+  dirty: { color: 'warning', text: '有未保存修改' },
+  saving: { color: 'processing', text: '保存中' },
   conflict: { color: 'error', text: '版本冲突' },
-  invalid: { color: 'error', text: '校验失败' },
+  invalid: { color: 'error', text: '校验未通过' },
   error: { color: 'error', text: '保存失败' },
 };
 
@@ -92,639 +111,610 @@ export default function Editor() {
   const storedProjectId = useAppStore((state) => state.currentProjectId);
   const storedScenarioId = useAppStore((state) => state.currentScenarioId);
   const setProjectContext = useAppStore((state) => state.setProjectContext);
-  const projectId = searchParams.get('projectId') ?? storedProjectId;
-  const scenarioId = searchParams.get('scenarioId') ?? storedScenarioId;
+  const canEdit = useCan('edit_scene');
+  const canRun = useCan('run_simulation');
+  const urlProjectId = searchParams.get('projectId');
+  const urlScenarioId = searchParams.get('scenarioId');
+  const scenarioId = urlScenarioId || storedScenarioId || '';
+  const contextProjectId = urlProjectId || storedProjectId || '';
 
-  // ===== 领域 API 接入 =====
-  const { data: serverData, isLoading, isError } = useScenario(scenarioId ?? '');
-  const saveMutation = useSaveScenario(scenarioId ?? '');
-  const autoLayoutMutation = useAutoLayoutScenario(scenarioId ?? '');
+  const scenarioQuery = useScenario(scenarioId);
+  const saveMutation = useSaveScenario(scenarioId);
+  const autoLayoutMutation = useAutoLayoutScenario(scenarioId);
+  const createSimulationMutation = useCreateSimulation();
+  const versionsQuery = useScenarioVersions(scenarioId);
 
-  const [components, setComponents] = useState<SceneComponent[]>(initialComponents);
-  // 历史栈：past 是可 undo 的快照，future 是可 redo 的快照
+  const [components, setComponents] = useState<SceneComponent[]>([]);
+  const [canvas, setCanvas] = useState<ScenarioData['canvas']>(DEFAULT_SCENARIO_CANVAS);
+  const [scenarioName, setScenarioName] = useState('');
+  const [scenarioVersion, setScenarioVersion] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [tool, setTool] = useState<EditorTool>('select');
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
   const [past, setPast] = useState<SceneComponent[][]>([]);
   const [future, setFuture] = useState<SceneComponent[][]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>('shelf-A1');
-  const [tool, setTool] = useState<string>('select');
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
   const [zoom, setZoom] = useState(100);
-  const [scenarioVersion, setScenarioVersion] = useState<number | null>(null);
-  const [scenarioCanvas, setScenarioCanvas] = useState<ScenarioData['canvas']>({ width: 1200, height: 800, scale: 1 });
-  const [logs, setLogs] = useState(editorOperationLogs);
-  const lastLoadedAtRef = useRef<number>(0);
+  const [libraryQuery, setLibraryQuery] = useState('');
+  const [activeTab, setActiveTab] = useState<PropertyTab>('properties');
+  const [validation, setValidation] = useState<ScenarioValidationRead>(() => validateSceneLocally([], DEFAULT_SCENARIO_CANVAS));
+  const [validating, setValidating] = useState(false);
+  const [versionsOpen, setVersionsOpen] = useState(false);
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customType, setCustomType] = useState<SceneComponent['type']>('shelf');
+  const [customName, setCustomName] = useState('自定义设备');
+  const [customWidth, setCustomWidth] = useState(100);
+  const [customHeight, setCustomHeight] = useState(50);
+  const [logs, setLogs] = useState<OperationLog[]>([]);
+  const loadedScenarioRef = useRef<string | null>(null);
+  const validationSequenceRef = useRef(0);
 
-  useEffect(() => {
-    if (projectId || scenarioId) {
-      setProjectContext({ projectId: projectId ?? undefined, scenarioId: scenarioId ?? undefined });
-    }
-  }, [projectId, scenarioId, setProjectContext]);
+  const selected = components.find((component) => component.id === selectedId) ?? null;
+  const effectiveProjectId = scenarioQuery.data?.project_id || contextProjectId;
+  const localValidation = useMemo(() => validateSceneLocally(components, canvas), [components, canvas]);
+  const stats = useMemo(() => sceneOverview(components, canvas), [components, canvas]);
+  const appliedStrategy = useMemo(() => {
+    const value = components.find((component) => typeof component.properties?.layout_strategy === 'string')?.properties?.layout_strategy;
+    const labels: Record<string, string> = {
+      balanced: '均衡调度方案',
+      throughput: '峰值吞吐方案',
+      energy_saver: '节能优化方案',
+    };
+    return typeof value === 'string' ? labels[value] ?? value : null;
+  }, [components]);
+  const invalidIds = useMemo(
+    () => new Set(validation.errors.flatMap((issue) => issue.component_ids)),
+    [validation.errors],
+  );
+  const sortedVersions = useMemo(
+    () => [...(versionsQuery.data ?? [])].sort((left, right) => right.version - left.version),
+    [versionsQuery.data],
+  );
+  const groupedLibrary = useMemo(() => {
+    const query = libraryQuery.trim().toLowerCase();
+    const filtered = editorComponentLibrary.filter((item) =>
+      !query || item.name.toLowerCase().includes(query) || item.spec.toLowerCase().includes(query),
+    );
+    return filtered.reduce<Record<string, typeof editorComponentLibrary>>((groups, item) => {
+      (groups[item.category] ??= []).push(item);
+      return groups;
+    }, {});
+  }, [libraryQuery]);
 
-  useEffect(() => {
-    if (!serverData) return;
-    setComponents(serverData.data.components);
-    setSelectedId(serverData.data.components[0]?.id ?? null);
-    setScenarioVersion(serverData.version);
-    setScenarioCanvas(serverData.data.canvas);
+  const addLog = useCallback((action: string, target?: string, details?: string) => {
+    const now = new Date();
+    const time = now.toLocaleTimeString('zh-CN', { hour12: false });
+    setLogs((current) => [{ time, action, target, details }, ...current].slice(0, 40));
+  }, []);
+
+  const applyScenario = useCallback((read: ScenarioRead, action = '加载场景') => {
+    const state = scenarioReadToEditorState(read);
+    setComponents(state.components);
+    setCanvas(state.canvas);
+    setScenarioName(state.name);
+    setScenarioVersion(state.version);
+    setSelectedId(state.components[0]?.id ?? null);
     setPast([]);
     setFuture([]);
     setSaveStatus('saved');
-    lastLoadedAtRef.current = Date.now();
-  }, [serverData]);
+    setValidation(validateSceneLocally(state.components, state.canvas));
+    loadedScenarioRef.current = read.id;
+    addLog(action, state.name, `v${state.version}`);
+    setProjectContext({ projectId: read.project_id, scenarioId: read.id });
+  }, [addLog, setProjectContext]);
 
-  const selected = components.find((c) => c.id === selectedId) ?? null;
+  useEffect(() => {
+    loadedScenarioRef.current = null;
+  }, [scenarioId]);
 
-  const groupedLib = useMemo(() => {
-    const groups: Record<string, typeof editorComponentLibrary> = {};
-    editorComponentLibrary.forEach((c) => {
-      if (!groups[c.category]) groups[c.category] = [];
-      groups[c.category].push(c);
-    });
-    return groups;
-  }, []);
+  useEffect(() => {
+    if (scenarioQuery.data && loadedScenarioRef.current !== scenarioQuery.data.id) {
+      applyScenario(scenarioQuery.data);
+    }
+  }, [applyScenario, scenarioQuery.data]);
 
-  // 推入历史栈（在修改前调用）
-  const pushHistory = useCallback((prev: SceneComponent[]) => {
-    setPast((p) => {
-      const next = [...p, prev];
-      if (next.length > HISTORY_LIMIT) next.shift();
-      return next;
-    });
+  useEffect(() => {
+    const sequence = ++validationSequenceRef.current;
+    setValidation(localValidation);
+    if (!scenarioId || saveStatus === 'saved' || !localValidation.valid) {
+      setValidating(false);
+      return;
+    }
+    const timer = window.setTimeout(async () => {
+      setValidating(true);
+      try {
+        const result = await validateScenario(scenarioId, components, canvas);
+        if (validationSequenceRef.current === sequence) setValidation(result);
+      } catch {
+        if (validationSequenceRef.current === sequence) setValidation(localValidation);
+      } finally {
+        if (validationSequenceRef.current === sequence) setValidating(false);
+      }
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [canvas, components, localValidation, saveStatus, scenarioId]);
+
+  useEffect(() => {
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (saveStatus !== 'saved') {
+        event.preventDefault();
+        event.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', beforeUnload);
+    return () => window.removeEventListener('beforeunload', beforeUnload);
+  }, [saveStatus]);
+
+  const pushHistory = useCallback((snapshot: SceneComponent[]) => {
+    setPast((current) => [...current, cloneComponents(snapshot)].slice(-HISTORY_LIMIT));
     setFuture([]);
   }, []);
 
-  const updateComponent = (id: string, patch: Partial<SceneComponent>) => {
-    setComponents((cs) => {
-      pushHistory(cs);
-      return cs.map((c) => (c.id === id ? { ...c, ...patch } : c));
+  const markDirty = useCallback(() => {
+    setSaveStatus((current) => current === 'saving' ? current : 'dirty');
+  }, []);
+
+  const updateComponent = useCallback((id: string, patch: Partial<SceneComponent>, log = true) => {
+    if (!canEdit) return;
+    setComponents((current) => {
+      const existing = current.find((component) => component.id === id);
+      if (!existing) return current;
+      pushHistory(current);
+      const next = current.map((component) => component.id === id
+        ? { ...component, ...patch, properties: patch.properties ?? component.properties }
+        : component);
+      if (log) addLog('修改组件', existing.name);
+      return next;
     });
-    setSaveStatus('dirty');
-  };
+    markDirty();
+  }, [addLog, canEdit, markDirty, pushHistory]);
+
+  const addComponent = useCallback((type: SceneComponent['type'], name: string, size?: { width: number; height: number }) => {
+    if (!canEdit) return;
+    const component = createSceneComponent(type, name, components, canvas, size);
+    pushHistory(components);
+    setComponents((current) => [...current, component]);
+    setSelectedId(component.id);
+    setTool('move');
+    markDirty();
+    addLog('添加组件', component.name, component.id);
+  }, [addLog, canEdit, canvas, components, markDirty, pushHistory]);
+
+  const deleteComponent = useCallback((id: string, confirm = true) => {
+    if (!canEdit) return;
+    const component = components.find((item) => item.id === id);
+    if (!component) return;
+    const perform = () => {
+      pushHistory(components);
+      setComponents((current) => current.filter((item) => item.id !== id));
+      setSelectedId((current) => current === id ? null : current);
+      markDirty();
+      addLog('删除组件', component.name);
+    };
+    if (!confirm) perform();
+    else Modal.confirm({ title: `删除“${component.name}”？`, content: '删除后可通过撤销恢复。', okText: '删除', okButtonProps: { danger: true }, onOk: perform });
+  }, [addLog, canEdit, components, markDirty, pushHistory]);
 
   const undo = useCallback(() => {
-    if (past.length === 0) {
-      message.info('没有可撤销的操作');
-      return;
-    }
-    setPast((p) => {
-      const last = p[p.length - 1];
-      setFuture((f) => [components, ...f]);
-      setComponents(last);
-      return p.slice(0, -1);
-    });
-    setSaveStatus('dirty');
-    addLogInternal('你', '撤销');
-  }, [past, components, message]);
+    if (!canEdit || !past.length) return;
+    const previous = past[past.length - 1];
+    setFuture((current) => [cloneComponents(components), ...current]);
+    setComponents(cloneComponents(previous));
+    setPast((current) => current.slice(0, -1));
+    setSelectedId((current) => previous.some((component) => component.id === current) ? current : null);
+    markDirty();
+    addLog('撤销');
+  }, [addLog, canEdit, components, markDirty, past]);
 
   const redo = useCallback(() => {
-    if (future.length === 0) {
-      message.info('没有可重做的操作');
-      return;
-    }
-    setFuture((f) => {
-      const next = f[0];
-      setPast((p) => [...p, components]);
-      setComponents(next);
-      return f.slice(1);
-    });
-    setSaveStatus('dirty');
-    addLogInternal('你', '重做');
-  }, [future, components, message]);
+    if (!canEdit || !future.length) return;
+    const next = future[0];
+    setPast((current) => [...current, cloneComponents(components)].slice(-HISTORY_LIMIT));
+    setComponents(cloneComponents(next));
+    setFuture((current) => current.slice(1));
+    markDirty();
+    addLog('重做');
+  }, [addLog, canEdit, components, future, markDirty]);
 
-  // 对齐辅助
   const alignSelected = useCallback((axis: 'left' | 'right' | 'center-h' | 'top' | 'bottom' | 'center-v') => {
-    if (!selectedId) {
-      message.warning('请先选中一个组件');
-      return;
-    }
-    setComponents((cs) => {
-      pushHistory(cs);
-      const idx = cs.findIndex((c) => c.id === selectedId);
-      if (idx < 0) return cs;
-      const sel = cs[idx];
-      const canvasW = 1200;
-      const canvasH = 700;
-      let patch: Partial<SceneComponent> = {};
-      switch (axis) {
-        case 'left': patch = { x: 0 }; break;
-        case 'right': patch = { x: canvasW - sel.width }; break;
-        case 'center-h': patch = { x: Math.round((canvasW - sel.width) / 2) }; break;
-        case 'top': patch = { y: 0 }; break;
-        case 'bottom': patch = { y: canvasH - sel.height }; break;
-        case 'center-v': patch = { y: Math.round((canvasH - sel.height) / 2) }; break;
-      }
-      return cs.map((c) => (c.id === selectedId ? { ...c, ...patch } : c));
-    });
-    setSaveStatus('dirty');
-    addLogInternal('你', '对齐', selected?.name, axis);
-  }, [selectedId, selected, message, pushHistory]);
+    if (!selected) return message.warning('请先选择组件');
+    const patch: Partial<SceneComponent> = {};
+    if (axis === 'left') patch.x = 0;
+    if (axis === 'right') patch.x = canvas.width - selected.width;
+    if (axis === 'center-h') patch.x = Math.round((canvas.width - selected.width) / 2);
+    if (axis === 'top') patch.y = 0;
+    if (axis === 'bottom') patch.y = canvas.height - selected.height;
+    if (axis === 'center-v') patch.y = Math.round((canvas.height - selected.height) / 2);
+    updateComponent(selected.id, patch);
+  }, [canvas, message, selected, updateComponent]);
 
-  const addLogInternal = (user: string, action: string, target?: string, details?: string) => {
-    const now = new Date();
-    const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    setLogs((prev) => [{ time, user, action, target, details }, ...prev].slice(0, 30));
-  };
-
-  const handleSelect = (id: string) => {
-    setSelectedId(id);
-    setTool('select');
-  };
-
-  const handleDelete = (id: string) => {
-    const c = components.find((x) => x.id === id);
-    if (!c) return;
-    setComponents((cs) => {
-      pushHistory(cs);
-      return cs.filter((x) => x.id !== id);
-    });
-    if (selectedId === id) setSelectedId(null);
-    setSaveStatus('dirty');
-    addLogInternal('你', '删除', c.name);
-    message.success(`已删除 ${c.name}`);
-  };
-
-  const handleRotate = (id: string) => {
-    const c = components.find((x) => x.id === id);
-    if (!c) return;
-    const newRot = (c.rotation + 90) % 360;
-    updateComponent(id, { rotation: newRot });
-    addLogInternal('你', '旋转', c.name, `${newRot}°`);
-  };
-
-  const handleDragStart = (e: React.MouseEvent, id: string) => {
-    if (tool !== 'drag') return;
-    e.preventDefault();
-    e.stopPropagation();
-    const c = components.find((x) => x.id === id);
-    if (!c) return;
-    const startX = e.clientX;
-    const startY = e.clientY;
-    const startCx = c.x;
-    const startCy = c.y;
+  const handleDragStart = (event: React.MouseEvent, component: SceneComponent) => {
+    if (!canEdit || tool !== 'move') return;
+    event.preventDefault();
+    event.stopPropagation();
+    const start = { x: event.clientX, y: event.clientY, componentX: component.x, componentY: component.y };
     const scale = zoom / 100;
-    let historyPushed = false;
-    const onMove = (ev: MouseEvent) => {
-      const dx = (ev.clientX - startX) / scale;
-      const dy = (ev.clientY - startY) / scale;
-      setComponents((cs) => {
-        if (!historyPushed) {
-          pushHistory(cs);
-          historyPushed = true;
-        }
-        return cs.map((x) => (x.id === id ? { ...x, x: Math.max(0, Math.round(startCx + dx)), y: Math.max(0, Math.round(startCy + dy)) } : x));
+    let moved = false;
+    let lastPosition = { x: component.x, y: component.y };
+    const snapshot = cloneComponents(components);
+    const onMove = (moveEvent: MouseEvent) => {
+      const position = clampComponentToCanvas(component, canvas, {
+        x: start.componentX + (moveEvent.clientX - start.x) / scale,
+        y: start.componentY + (moveEvent.clientY - start.y) / scale,
       });
+      moved = moved || position.x !== component.x || position.y !== component.y;
+      lastPosition = position;
+      setComponents((current) => current.map((item) => item.id === component.id ? { ...item, ...position } : item));
     };
     const onUp = () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
-      addLogInternal('你', '移动', c.name, `→ (${c.x}, ${c.y})`);
-      setSaveStatus('dirty');
+      if (moved) {
+        pushHistory(snapshot);
+        markDirty();
+        addLog('移动组件', component.name, `(${lastPosition.x}, ${lastPosition.y})`);
+      }
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
   };
 
-  const handleSave = () => {
-    if (!scenarioId) {
-      message.warning('缺少场景 ID，请从首页创建或应用模板后再保存');
-      return;
+  const handleComponentClick = (event: React.MouseEvent, component: SceneComponent) => {
+    event.stopPropagation();
+    if (tool === 'delete') deleteComponent(component.id);
+    else setSelectedId(component.id);
+  };
+
+  const handleSave = useCallback(() => {
+    if (!canEdit) return message.warning('当前账号只有查看权限');
+    if (!scenarioId) return message.warning('缺少场景 ID');
+    if (!localValidation.valid) {
+      setValidation(localValidation);
+      setSaveStatus('invalid');
+      setActiveTab('validation');
+      return message.error(`场景存在 ${localValidation.errors.length} 个问题，请修复后保存`);
     }
     setSaveStatus('saving');
-    saveMutation.mutate({ components, canvas: scenarioCanvas, expectedVersion: scenarioVersion ?? undefined }, {
+    saveMutation.mutate({ components, canvas, expectedVersion: scenarioVersion ?? undefined }, {
       onSuccess: (saved) => {
+        setComponents(saved.data.components);
+        setCanvas(saved.data.canvas);
         setScenarioVersion(saved.version);
+        setScenarioName(saved.name);
         setSaveStatus('saved');
-        addLogInternal('你', '保存草稿', `${components.length} 个组件`, saved.updated_at);
-        message.success(`草稿已保存为版本 v${saved.version}`);
+        setValidation(validateSceneLocally(saved.data.components, saved.data.canvas));
+        addLog('保存场景', saved.name, `v${saved.version}`);
+        message.success(`场景已保存为 v${saved.version}`);
       },
       onError: (error) => {
         if (error instanceof ScenarioConflictError) {
           setSaveStatus('conflict');
-          message.warning('检测到版本冲突，请重新加载最新场景后再保存');
+          message.warning(`服务器已有更新${error.currentVersion ? `（v${error.currentVersion}）` : ''}，请加载最新版本`);
         } else if (error instanceof ScenarioValidationError) {
+          setValidation(error.validation);
           setSaveStatus('invalid');
+          setActiveTab('validation');
           message.error(error.message);
         } else {
           setSaveStatus('error');
-          message.error('保存失败，请检查后端服务后重试');
+          message.error(getApiErrorMessage(error, '保存失败，请检查后端连接后重试'));
         }
       },
     });
+  }, [addLog, canEdit, canvas, components, localValidation, message, saveMutation, scenarioId, scenarioVersion]);
+
+  const updateCanvas = useCallback((patch: Partial<ScenarioData['canvas']>) => {
+    if (!canEdit) return;
+    setCanvas((current) => ({ ...current, ...patch }));
+    markDirty();
+  }, [canEdit, markDirty]);
+
+  const fetchLatest = async () => {
+    const result = await scenarioQuery.refetch();
+    if (!result.data) throw result.error ?? new Error('未读取到场景数据');
+    applyScenario(result.data, '加载服务器最新版本');
+    message.success(`已加载服务器版本 v${result.data.version}`);
   };
 
   const handleReload = () => {
-    if (!scenarioId) {
-      message.warning('缺少场景 ID，无法从服务器重新加载');
-      return;
-    }
-    if (isError) {
-      message.error('场景加载失败，请检查后端服务后重试');
-      return;
-    }
+    const run = () => void fetchLatest().catch((error) => message.error(getApiErrorMessage(error, '重新加载失败')));
+    if (saveStatus === 'saved') run();
+    else Modal.confirm({
+      title: '放弃本地修改并加载服务器版本？',
+      content: '未保存修改将被覆盖。保存过的历史版本不会受影响。',
+      okText: '加载最新版本',
+      onOk: run,
+    });
+  };
 
-    const applyServerData = () => {
-      if (!serverData) return;
-      setComponents(serverData.data.components);
-      setSelectedId(serverData.data.components[0]?.id ?? null);
-      setScenarioVersion(serverData.version);
-      setScenarioCanvas(serverData.data.canvas);
-      setSaveStatus('saved');
-      setPast([]);
-      setFuture([]);
-      addLogInternal('系统', '从服务器重新加载', `v${serverData.version}`);
-      message.success(`已加载服务器版本 v${serverData.version}`);
-    };
-
-    if (saveStatus !== 'saved') {
-      Modal.confirm({
-        title: '放弃未保存的修改？',
-        content: '当前修改、冲突或校验状态将被服务器版本覆盖。',
-        okText: '放弃并重新加载',
-        cancelText: '取消',
-        onOk: applyServerData,
-      });
-    } else if (serverData) {
-      applyServerData();
-    } else {
-      message.info(isLoading ? '场景仍在加载中' : '服务器没有可加载的场景数据');
+  const handleValidate = async () => {
+    if (!scenarioId) return;
+    setValidating(true);
+    try {
+      const result = await validateScenario(scenarioId, components, canvas);
+      setValidation(result);
+      setActiveTab('validation');
+      if (result.valid) message.success('场景校验通过');
+      else message.warning(`发现 ${result.errors.length} 个问题`);
+    } catch (error) {
+      message.error(getApiErrorMessage(error, '校验服务不可用'));
+    } finally {
+      setValidating(false);
     }
   };
 
   const handleAutoLayout = () => {
-    if (!scenarioId) {
-      message.warning('缺少场景 ID，无法执行自动布局');
-      return;
-    }
-    autoLayoutMutation.mutate({ components, canvas: scenarioCanvas }, {
+    if (!canEdit) return;
+    autoLayoutMutation.mutate({ components, canvas }, {
       onSuccess: (result) => {
         pushHistory(components);
-        setComponents(result.data.components);
-        setScenarioCanvas(result.data.canvas);
+        setComponents(cloneComponents(result.data.components));
+        setCanvas(result.data.canvas);
+        setValidation(result.validation);
         setSelectedId(result.data.components[0]?.id ?? null);
-        setSaveStatus('dirty');
-        addLogInternal('系统', '后端自动布局', `${result.data.components.length} 个组件`);
-        message.success('布局已由后端生成，请保存草稿');
+        markDirty();
+        addLog('自动布局', undefined, `${result.data.components.length} 个组件`);
+        message.success('自动布局已生成，请检查并保存');
       },
-      onError: (error) => {
-        message.error(error instanceof Error ? error.message : '自动布局失败');
-      },
+      onError: (error) => message.error(getApiErrorMessage(error, '自动布局失败')),
     });
   };
 
-  const handleEnterSim = () => {
-    if (saveStatus === 'dirty') {
-      message.warning('请先保存草稿');
-      return;
-    }
-    message.success('正在进入仿真...');
-    setTimeout(() => navigate(`/simulation?projectId=${projectId ?? ''}&scenarioId=${scenarioId ?? ''}`), 600);
-  };
-
-  const handleAddComponent = (category: string, name: string) => {
-    const newId = `${category}-${Date.now()}`;
-    const offset = (components.length % 5) * 30;
-    const newComp: SceneComponent = {
-      id: newId,
-      type: category as SceneComponent['type'],
-      name: `${name} #${components.length + 1}`,
-      x: 100 + offset,
-      y: 100 + offset,
-      width: category === 'shelf' ? 240 : category === 'agv' ? 24 : 40,
-      height: category === 'shelf' ? 80 : category === 'agv' ? 16 : 40,
-      rotation: 0,
-      properties: {},
+  const restoreVersion = (version: ScenarioVersionRead) => {
+    const perform = () => {
+      pushHistory(components);
+      setComponents(cloneComponents(version.data.components));
+      setCanvas({ ...version.data.canvas });
+      setSelectedId(version.data.components[0]?.id ?? null);
+      setSaveStatus('dirty');
+      setVersionsOpen(false);
+      addLog('恢复历史快照', version.name, `v${version.version}`);
+      message.info(`已载入 v${version.version} 快照，保存后将生成新版本`);
     };
-    setComponents((cs) => {
-      pushHistory(cs);
-      return [...cs, newComp];
-    });
-    setSelectedId(newId);
-    setSaveStatus('dirty');
-    addLogInternal('你', '添加', newComp.name);
-    message.success(`已添加 ${newComp.name}`);
+    Modal.confirm({ title: `载入历史版本 v${version.version}？`, content: '该操作只替换当前画布，点击保存后才会写入服务器。', okText: '载入快照', onOk: perform });
   };
 
-  // 键盘快捷键：Ctrl+Z / Ctrl+Y
+  const enterSimulation = async () => {
+    if (!canRun) return message.warning('当前账号没有运行仿真的权限');
+    if (!effectiveProjectId || !scenarioId) return message.warning('缺少项目或场景上下文');
+
+    // Derive robot_count from scene AGV components — closes the data loop
+    // so the editor's AGVs match the simulation's AGVs.
+    const agvCount = components.filter((c) => c.type === 'agv').length;
+    if (components.length === 0) {
+      return message.warning('场景为空，请先添加设备组件再进入仿真');
+    }
+    if (agvCount === 0) {
+      return message.warning('场景中没有 AGV，请至少添加一台 AGV 再进入仿真');
+    }
+
+    // 如果有未保存修改，先自动保存再进入仿真
+    let currentVersion = scenarioVersion;
+    if (saveStatus !== 'saved') {
+      try {
+        const saved = await saveMutation.mutateAsync({ components, canvas, expectedVersion: scenarioVersion ?? undefined });
+        setComponents(saved.data.components);
+        setCanvas(saved.data.canvas);
+        currentVersion = saved.version;
+        setScenarioVersion(saved.version);
+        setSaveStatus('saved');
+      } catch {
+        return message.error('保存失败，无法进入仿真');
+      }
+    }
+
+    try {
+      const run = await createSimulationMutation.mutateAsync({
+        project_id: effectiveProjectId,
+        scenario_id: scenarioId,
+        // Don't send robot_count — let the backend derive it from the
+        // scenario snapshot. This ensures the count always matches the
+        // editor's AGV components.
+        order_count: Math.max(30, agvCount * 8),
+        random_seed: Date.now() % 2_147_483_647,
+        scenario_version: currentVersion,
+      });
+      setProjectContext({ projectId: effectiveProjectId, scenarioId, simulationId: run.id });
+      if (!effectiveProjectId) {
+        message.error('缺少项目 ID，无法跳转仿真');
+        return;
+      }
+      navigate(`/simulation?projectId=${encodeURIComponent(effectiveProjectId)}&scenarioId=${encodeURIComponent(scenarioId)}&simulationId=${encodeURIComponent(run.id)}`);
+    } catch (error) {
+      message.error(getApiErrorMessage(error, '创建仿真运行失败，请检查后端连接后重试'));
+    }
+  };
+
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
-        e.preventDefault();
-        undo();
-      } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
-        e.preventDefault();
-        redo();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (isFormInteractionTarget(event.target)) return;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        handleSave();
+      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !event.shiftKey) {
+        event.preventDefault(); undo();
+      } else if ((event.ctrlKey || event.metaKey) && (event.key.toLowerCase() === 'y' || (event.key.toLowerCase() === 'z' && event.shiftKey))) {
+        event.preventDefault(); redo();
+      } else if ((event.key === 'Delete' || event.key === 'Backspace') && selectedId) {
+        event.preventDefault(); deleteComponent(selectedId);
+      } else if (event.key === 'Escape') {
+        setSelectedId(null); setTool('select');
       }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [undo, redo]);
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [deleteComponent, handleSave, redo, selectedId, undo]);
+
+  if (!scenarioId) {
+    return (
+      <div className="editor-state-card">
+        <Empty description="没有可编辑的场景">
+          <p>请先从首页创建项目与场景，或在项目中心打开已有场景。</p>
+          <Space><Button icon={<HomeOutlined />} onClick={() => navigate('/')}>创建场景</Button><Button type="primary" icon={<FolderOpenOutlined />} onClick={() => navigate('/projects')}>项目中心</Button></Space>
+        </Empty>
+      </div>
+    );
+  }
+
+  if (scenarioQuery.isLoading && !scenarioQuery.data) {
+    return <div className="editor-state-card"><Skeleton active paragraph={{ rows: 12 }} /></div>;
+  }
+
+  if (scenarioQuery.isError && !scenarioQuery.data) {
+    return (
+      <div className="editor-state-card">
+        <Alert type="error" showIcon message="场景加载失败" description={`${getApiErrorMessage(scenarioQuery.error, '场景不存在、无访问权限或后端未启动')}（ID: ${scenarioId}）`} action={<Space direction="vertical"><Button onClick={() => void scenarioQuery.refetch()}>重试</Button><Button onClick={() => navigate('/projects')}>返回项目中心</Button></Space>} />
+      </div>
+    );
+  }
 
   return (
     <div className="editor-page">
-      <div className="editor-header">
+      {!canEdit && <Alert type="info" showIcon message="只读场景" description="当前账号可以查看场景、校验结果和历史版本，但不能修改或保存。" />}
+      {contextProjectId && scenarioQuery.data && contextProjectId !== scenarioQuery.data.project_id && (
+        <Alert type="warning" showIcon message="项目上下文已纠正" description="URL 中的项目 ID 与场景归属不一致，后续操作将以服务器返回的项目为准。" />
+      )}
+      {saveStatus === 'conflict' && (
+        <Alert type="error" showIcon message="版本冲突：服务器场景已被其他会话修改" description="加载最新版本会放弃当前本地修改；也可以先查看历史版本确认差异。" action={<Space><Button onClick={() => setVersionsOpen(true)}>查看版本</Button><Button danger onClick={handleReload}>加载最新版本</Button></Space>} />
+      )}
+
+      <header className="editor-header">
         <div className="editor-header-left">
-          <h1 className="editor-title">
-            场景编辑器 / 仓库建模
-            <span className="version-tag">v{scenarioVersion ?? "—"}</span>
-            <Tag color={saveStatusMeta[saveStatus].color} className="save-tag">
-              {saveStatusMeta[saveStatus].text}
-            </Tag>
-            {selected && <Tag color="blue" className="save-tag">已选中: {selected.name}</Tag>}
-            {!scenarioId && <Tag color="warning" className="save-tag">未绑定场景</Tag>}
-            {isLoading && <Tag color="processing" className="save-tag">正在加载场景</Tag>}
-            {isError && <Tag color="error" className="save-tag">场景加载失败</Tag>}
-          </h1>
+          <div className="editor-eyebrow">SCENE WORKSPACE · {scenarioId.slice(0, 8)}</div>
+          <h1 className="editor-title">{scenarioName || '仓库场景'} <Tag color={saveStatusMeta[saveStatus].color}>{saveStatusMeta[saveStatus].text}</Tag><Tag>v{scenarioVersion ?? '—'}</Tag></h1>
+          {effectiveProjectId && <ProjectContextBar projectId={effectiveProjectId} scenarioId={scenarioId} />}
         </div>
         <div className="editor-header-right">
-          <Button.Group>
-            <Button icon={<UndoOutlined />} onClick={undo} disabled={past.length === 0} title="撤销 (Ctrl+Z)">撤销</Button>
-            <Button icon={<RedoOutlined />} onClick={redo} disabled={future.length === 0} title="重做 (Ctrl+Y)">重做</Button>
-          </Button.Group>
-          <Button icon={<ReloadOutlined />} onClick={handleReload}>重新加载</Button>
-          <Button icon={<ThunderboltOutlined />} onClick={handleAutoLayout} loading={autoLayoutMutation.isPending}>自动生成布局</Button>
-          <Button icon={<SaveOutlined />} onClick={handleSave} loading={saveStatus === 'saving'}>保存草稿</Button>
-          <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleEnterSim}>进入仿真</Button>
+          <Button icon={<HistoryOutlined />} onClick={() => setVersionsOpen(true)}>版本</Button>
+          <Button icon={<ReloadOutlined />} onClick={handleReload} loading={scenarioQuery.isFetching}>重新加载</Button>
+          <Button icon={<ThunderboltOutlined />} onClick={handleAutoLayout} loading={autoLayoutMutation.isPending} disabled={!canEdit || !components.length}>自动布局</Button>
+          <Button icon={<CheckCircleOutlined />} onClick={() => void handleValidate()} loading={validating}>校验</Button>
+          <Button type="primary" icon={<SaveOutlined />} onClick={handleSave} loading={saveMutation.isPending} disabled={!canEdit}>保存</Button>
+          <Button icon={<PlayCircleOutlined />} onClick={() => void enterSimulation()} loading={createSimulationMutation.isPending} disabled={!canRun}>进入仿真</Button>
         </div>
-      </div>
+      </header>
 
       <div className="editor-grid">
-        <div className="editor-lib">
-          <div className="lib-search">
-            <Input placeholder="搜索组件" prefix={<span>🔍</span>} allowClear />
-          </div>
+        <aside className="editor-lib">
+          <Input.Search value={libraryQuery} onChange={(event) => setLibraryQuery(event.target.value)} placeholder="搜索组件或规格" allowClear />
           <div className="lib-list">
-            {Object.entries(groupedLib).map(([cat, items]) => {
-              const labelMap: Record<string, string> = {
-                shelf: '货架', agv: 'AGV', arm: '机械臂', conveyor: '传送带', station: '工作站', charger: '充电桩', obstacle: '围栏/障碍物',
-              };
-              return (
-                <div key={cat} className="lib-group">
-                  <div className="lib-group-title">
-                    {labelMap[cat] ?? cat}
-                  </div>
-                  {items.map((c) => (
-                    <div
-                      key={c.name}
-                      className="lib-item"
-                      onClick={() => handleAddComponent(c.category, c.name)}
-                      style={{ cursor: 'pointer' }}
-                      title={`点击添加到画布`}
-                    >
-                      <div className="lib-item-icon" style={{ background: `${c.iconColor}18`, color: c.iconColor }}>
-                        {c.category === 'shelf' && '🗄️'}
-                        {c.category === 'agv' && '🤖'}
-                        {c.category === 'arm' && '🦾'}
-                        {c.category === 'conveyor' && '➰'}
-                        {c.category === 'station' && '📍'}
-                        {c.category === 'charger' && '⚡'}
-                        {c.category === 'obstacle' && '🧱'}
-                      </div>
-                      <div className="lib-item-body">
-                        <div className="lib-item-name">{c.name}</div>
-                        <div className="lib-item-spec">{c.spec}</div>
-                        <div className="lib-item-count">数量：{c.count}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              );
-            })}
-            <Button type="dashed" block icon={<span>+</span>} className="lib-add-btn">
-              添加自定义组件
-            </Button>
-          </div>
-          <div className="lib-footer">
-            {tool === 'select' ? '👆 单击组件可选中 / 删除' : tool === 'drag' ? '✋ 拖拽组件可移动位置' : `工具：${tool}`}
-          </div>
-        </div>
-
-        <div className="editor-canvas-wrap">
-          <div className="canvas-toolbar">
-            {editorTools.map((t) => (
-              <Button
-                key={t.key}
-                size="small"
-                type={tool === t.key ? 'primary' : 'default'}
-                icon={toolIconMap[t.icon]}
-                title={t.label}
-                onClick={() => {
-                  setTool(t.key);
-                  if (t.key === 'delete' && selectedId) handleDelete(selectedId);
-                }}
-              >
-                {t.label}
-              </Button>
+            {!Object.keys(groupedLibrary).length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有匹配组件" />}
+            {Object.entries(groupedLibrary).map(([category, items]) => (
+              <section className="lib-group" key={category}>
+                <div className="lib-group-title">{typeLabels[category as SceneComponent['type']] ?? category}</div>
+                {items.map((item) => (
+                  <button key={item.name} type="button" className="lib-item" disabled={!canEdit} onClick={() => addComponent(item.category as SceneComponent['type'], item.name)}>
+                    <span className="lib-item-icon" style={{ color: item.iconColor, background: `${item.iconColor}18` }}>{iconMap[item.category as SceneComponent['type']]}</span>
+                    <span className="lib-item-body"><b>{item.name}</b><small>{item.spec}</small></span>
+                    <PlusOutlined />
+                  </button>
+                ))}
+              </section>
             ))}
-            {selectedId && (
-              <>
-                <Button size="small" onClick={() => handleRotate(selectedId)} icon={<ReloadOutlined />}>旋转</Button>
-                <Button size="small" danger onClick={() => handleDelete(selectedId)} icon={<DeleteOutlined />}>删除</Button>
-              </>
-            )}
-            <Dropdown
-              menu={{
-                items: [
-                  { key: 'left', label: '左对齐', onClick: () => alignSelected('left') },
-                  { key: 'right', label: '右对齐', onClick: () => alignSelected('right') },
-                  { key: 'center-h', label: '水平居中', onClick: () => alignSelected('center-h') },
-                  { type: 'divider' as const },
-                  { key: 'top', label: '顶部对齐', onClick: () => alignSelected('top') },
-                  { key: 'bottom', label: '底部对齐', onClick: () => alignSelected('bottom') },
-                  { key: 'center-v', label: '垂直居中', onClick: () => alignSelected('center-v') },
-                ],
-              }}
-            >
-              <Button size="small" icon={<AlignCenterOutlined />}>对齐</Button>
-            </Dropdown>
           </div>
-          <div className="editor-canvas">
-            <div className="canvas-grid" style={{ transform: `scale(${zoom / 100})`, transformOrigin: '0 0' }}>
-              {components.map((c) => (
-                <div
-                  key={c.id}
-                  className={`canvas-component ${selectedId === c.id ? 'selected' : ''}`}
-                  style={{
-                    left: c.x,
-                    top: c.y,
-                    width: c.width,
-                    height: c.height,
-                    background: `${colorMap[c.type]}30`,
-                    border: `2px solid ${selectedId === c.id ? '#2b6fff' : colorMap[c.type]}`,
-                    color: colorMap[c.type],
-                    transform: `rotate(${c.rotation}deg)`,
-                    cursor: tool === 'drag' ? 'move' : 'pointer',
-                  }}
-                  onClick={(e) => { e.stopPropagation(); handleSelect(c.id); }}
-                  onMouseDown={(e) => handleDragStart(e, c.id)}
-                >
-                  {c.name}
-                </div>
-              ))}
-              <div className="zone-label" style={{ left: 200, top: 200, color: '#3b82f6' }}>A 区</div>
-              <div className="zone-label" style={{ left: 760, top: 200, color: '#22c55e' }}>B 区</div>
-              <div className="zone-label" style={{ left: 200, top: 460, color: '#f59e0b' }}>C 区</div>
-              <div className="zone-label" style={{ left: 760, top: 460, color: '#a855f7' }}>D 区</div>
-              <div className="door-label" style={{ left: 200, top: 30, color: '#94a3b8' }}>出货口 01</div>
-              <div className="door-label" style={{ left: 360, top: 30, color: '#94a3b8' }}>出货口 02</div>
-              <div className="door-label" style={{ left: 800, top: 30, color: '#94a3b8' }}>收货口 01</div>
-              <div className="door-label" style={{ left: 960, top: 30, color: '#94a3b8' }}>收货口 02</div>
-              <div className="door-label" style={{ left: 480, top: 600, color: '#94a3b8' }}>充电区</div>
-            </div>
-          </div>
-          <div className="canvas-bottom">
-            <div className="canvas-zoom">
-              <Button size="small" onClick={() => setZoom((z) => Math.max(50, z - 10))} icon={<ZoomOutOutlined />}>-</Button>
-              <span className="zoom-text num-font">{zoom}%</span>
-              <Button size="small" onClick={() => setZoom((z) => Math.min(200, z + 10))} icon={<ZoomInOutlined />}>+</Button>
-            </div>
-            <div className="canvas-scale">0    10    20    30m</div>
-            <div style={{ fontSize: 11, color: '#6b7280' }}>
-              组件 {components.length} 个 · 选中 {selectedId ? 1 : 0} 个 · 撤销栈 {past.length}/{HISTORY_LIMIT} · Ctrl+Z 撤销 / Ctrl+Y 重做
-            </div>
-          </div>
-        </div>
+          <Button type="dashed" icon={<PlusOutlined />} disabled={!canEdit} onClick={() => setCustomOpen(true)}>自定义组件</Button>
+        </aside>
 
-        <div className="editor-aside">
-          <SectionCard
-            title={selected ? `属性：${selected.name}` : '属性配置'}
-            extra={<span className="aside-id">ID: {selected?.id ?? '—'}</span>}
-            bodyHeight={420}
-          >
-            <Tabs
-              defaultActiveKey="props"
-              size="small"
-              items={[
-                { key: 'props', label: '属性' },
-                { key: 'style', label: '样式' },
-              ]}
-            />
-            {selected ? (
-              <div className="prop-list">
-                <div className="prop-row">
-                  <div className="prop-label">名称</div>
-                  <div className="prop-value">
-                    <Input size="small" value={selected.name} onChange={(e) => updateComponent(selected.id, { name: e.target.value })} />
-                  </div>
-                </div>
-                <PropRow label="类型" value={selected.type} />
-                <div className="prop-row">
-                  <div className="prop-label">坐标 (m)</div>
-                  <div className="prop-value">
-                    <InputNumber size="small" value={selected.x} onChange={(v) => v !== null && updateComponent(selected.id, { x: v })} addonBefore="X" style={{ width: 90 }} />
-                    <InputNumber size="small" value={selected.y} onChange={(v) => v !== null && updateComponent(selected.id, { y: v })} addonBefore="Y" style={{ width: 90, marginLeft: 6 }} />
-                  </div>
-                </div>
-                <div className="prop-row">
-                  <div className="prop-label">尺寸 (m)</div>
-                  <div className="prop-value">
-                    <InputNumber size="small" value={selected.width} onChange={(v) => v !== null && updateComponent(selected.id, { width: v })} addonBefore="宽" style={{ width: 90 }} />
-                    <InputNumber size="small" value={selected.height} onChange={(v) => v !== null && updateComponent(selected.id, { height: v })} addonBefore="高" style={{ width: 90, marginLeft: 6 }} />
-                  </div>
-                </div>
-                <div className="prop-row">
-                  <div className="prop-label">朝向</div>
-                  <div className="prop-value">
-                    <InputNumber size="small" value={selected.rotation} onChange={(v) => v !== null && updateComponent(selected.id, { rotation: v })} addonAfter="°" style={{ width: 110 }} />
-                  </div>
-                </div>
-                {selected.type === 'shelf' && (
-                  <div className="prop-row">
-                    <div className="prop-label">容量</div>
-                    <div className="prop-value">
-                      <InputNumber size="small" value={Number(selected.properties.capacity ?? 200)} onChange={(v) => v !== null && updateComponent(selected.id, { properties: { ...selected.properties, capacity: v } })} addonAfter="托/层" style={{ width: 130 }} />
+        <main className="editor-canvas-wrap">
+          <div className="canvas-toolbar">
+            <Button type={tool === 'select' ? 'primary' : 'default'} icon={<SelectOutlined />} onClick={() => setTool('select')}>选择</Button>
+            <Button type={tool === 'move' ? 'primary' : 'default'} icon={<DragOutlined />} onClick={() => setTool('move')} disabled={!canEdit}>移动</Button>
+            <Button type={tool === 'delete' ? 'primary' : 'default'} danger={tool === 'delete'} icon={<DeleteOutlined />} onClick={() => setTool('delete')} disabled={!canEdit}>删除</Button>
+            <Button.Group>
+              <Button icon={<UndoOutlined />} onClick={undo} disabled={!canEdit || !past.length}>撤销</Button>
+              <Button icon={<RedoOutlined />} onClick={redo} disabled={!canEdit || !future.length}>重做</Button>
+            </Button.Group>
+            <Dropdown menu={{ items: [
+              { key: 'left', label: '左对齐', onClick: () => alignSelected('left') },
+              { key: 'right', label: '右对齐', onClick: () => alignSelected('right') },
+              { key: 'center-h', label: '水平居中', onClick: () => alignSelected('center-h') },
+              { type: 'divider' },
+              { key: 'top', label: '顶部对齐', onClick: () => alignSelected('top') },
+              { key: 'bottom', label: '底部对齐', onClick: () => alignSelected('bottom') },
+              { key: 'center-v', label: '垂直居中', onClick: () => alignSelected('center-v') },
+            ] }}><Button icon={<AlignCenterOutlined />} disabled={!canEdit || !selected}>对齐</Button></Dropdown>
+            {selected && <Button icon={<ReloadOutlined />} disabled={!canEdit} onClick={() => updateComponent(selected.id, { rotation: (selected.rotation + 90) % 360 })}>旋转</Button>}
+          </div>
+          <div className="editor-canvas" onClick={() => setSelectedId(null)}>
+            {!components.length && <div className="canvas-empty"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="这是一个空场景"><Button type="primary" icon={<PlusOutlined />} disabled={!canEdit} onClick={(event) => { event.stopPropagation(); addComponent('shelf', '标准货架'); }}>添加第一个组件</Button></Empty></div>}
+            <div className="canvas-stage" style={{ width: canvas.width * zoom / 100, height: canvas.height * zoom / 100 }}>
+              <div className="canvas-grid" style={{ width: canvas.width, height: canvas.height, transform: `scale(${zoom / 100})`, transformOrigin: '0 0' }}>
+                {components.map((component) => (
+                  <Tooltip key={component.id} title={`${component.name} · (${component.x}, ${component.y})`} mouseEnterDelay={0.5}>
+                    <div
+                      className={`canvas-component type-${component.type} ${selectedId === component.id ? 'selected' : ''} ${invalidIds.has(component.id) ? 'invalid' : ''}`}
+                      style={{ left: component.x, top: component.y, width: component.width, height: component.height, color: colorMap[component.type], background: `${colorMap[component.type]}22`, borderColor: colorMap[component.type], transform: `rotate(${component.rotation}deg)`, cursor: tool === 'move' ? 'move' : tool === 'delete' ? 'not-allowed' : 'pointer' }}
+                      onClick={(event) => handleComponentClick(event, component)}
+                      onMouseDown={(event) => handleDragStart(event, component)}
+                    >
+                      <span>{iconMap[component.type]}</span><b>{component.name}</b>
                     </div>
-                  </div>
-                )}
-                {selected.type === 'agv' && (
-                  <div className="prop-row">
-                    <div className="prop-label">电量</div>
-                    <div className="prop-value">
-                      <InputNumber size="small" min={0} max={100} value={Number(selected.properties.battery ?? 80)} onChange={(v) => v !== null && updateComponent(selected.id, { properties: { ...selected.properties, battery: v } })} addonAfter="%" style={{ width: 130 }} />
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div style={{ textAlign: 'center', color: '#9ca3af', padding: '40px 0', fontSize: 13 }}>
-                请在画布中选择一个组件
-              </div>
-            )}
-          </SectionCard>
-
-          <SectionCard
-            title="场景规则"
-            extra={<a>编辑规则</a>}
-            bodyHeight={200}
-          >
-            <div className="rule-list">
-              <div className="rule-row">
-                <span className="rule-label">通行方向</span>
-                <Select size="small" defaultValue={editorSceneRules.direction} style={{ width: 140 }} options={[{ value: '双向通行', label: '双向通行' }]} />
-              </div>
-              <div className="rule-row">
-                <span className="rule-label">速度限制</span>
-                <InputNumber size="small" defaultValue={editorSceneRules.speedLimit} addonAfter="m/s" style={{ width: 140 }} />
-              </div>
-              <div className="rule-row">
-                <span className="rule-label">禁行区域</span>
-                <span className="rule-value">{editorSceneRules.forbiddenZones} 处区域</span>
-              </div>
-              <div className="rule-row">
-                <span className="rule-label">设备安全边界</span>
-                <Tag color={editorSceneRules.safetyBoundary === '已启用' ? 'success' : 'default'}>{editorSceneRules.safetyBoundary}</Tag>
+                  </Tooltip>
+                ))}
               </div>
             </div>
-          </SectionCard>
-        </div>
+          </div>
+          <footer className="canvas-bottom">
+            <Space.Compact><Button icon={<ZoomOutOutlined />} onClick={() => setZoom((value) => Math.max(40, value - 10))} /><Button className="zoom-value" onClick={() => setZoom(100)}>{zoom}%</Button><Button icon={<ZoomInOutlined />} onClick={() => setZoom((value) => Math.min(180, value + 10))} /></Space.Compact>
+            <span className="canvas-hint">{tool === 'move' ? '拖动组件调整位置' : tool === 'delete' ? '点击组件删除' : '点击组件查看属性'} · Ctrl+S 保存 · Delete 删除 · Esc 取消选择</span>
+            <Tag color={validation.valid ? 'success' : 'error'}>{validating ? '校验中' : validation.valid ? '校验通过' : `${validation.errors.length} 个问题`}</Tag>
+          </footer>
+        </main>
+
+        <aside className="editor-aside">
+          <Tabs activeKey={activeTab} onChange={(key) => setActiveTab(key as PropertyTab)} items={[
+            { key: 'properties', label: '组件属性' },
+            { key: 'validation', label: <span>场景校验 {validation.errors.length > 0 && <Tag color="error">{validation.errors.length}</Tag>}</span> },
+          ]} />
+          {activeTab === 'properties' ? (
+            selected ? <div className="prop-list">
+              <div className="aside-selection"><span style={{ background: `${colorMap[selected.type]}20`, color: colorMap[selected.type] }}>{iconMap[selected.type]}</span><div><b>{selected.name}</b><small>{selected.id}</small></div></div>
+              <PropertyField label="名称"><Input value={selected.name} disabled={!canEdit} maxLength={120} onChange={(event) => updateComponent(selected.id, { name: event.target.value }, false)} /></PropertyField>
+              <PropertyField label="类型"><Select value={selected.type} disabled options={Object.entries(typeLabels).map(([value, label]) => ({ value, label }))} /></PropertyField>
+              <div className="property-grid"><PropertyField label="X"><InputNumber value={selected.x} min={0} max={Math.max(0, canvas.width - selected.width)} disabled={!canEdit} onChange={(value) => value !== null && updateComponent(selected.id, { x: value }, false)} /></PropertyField><PropertyField label="Y"><InputNumber value={selected.y} min={0} max={Math.max(0, canvas.height - selected.height)} disabled={!canEdit} onChange={(value) => value !== null && updateComponent(selected.id, { y: value }, false)} /></PropertyField></div>
+              <div className="property-grid"><PropertyField label="宽度"><InputNumber value={selected.width} min={1} max={canvas.width} disabled={!canEdit} onChange={(value) => value !== null && updateComponent(selected.id, { width: value }, false)} /></PropertyField><PropertyField label="高度"><InputNumber value={selected.height} min={1} max={canvas.height} disabled={!canEdit} onChange={(value) => value !== null && updateComponent(selected.id, { height: value }, false)} /></PropertyField></div>
+              <PropertyField label="旋转角度"><InputNumber value={selected.rotation} min={0} max={359} addonAfter="°" disabled={!canEdit} onChange={(value) => value !== null && updateComponent(selected.id, { rotation: value }, false)} /></PropertyField>
+              {selected.type === 'shelf' && <PropertyField label="货架容量"><InputNumber value={Number(selected.properties.capacity ?? 200)} min={1} addonAfter="托" disabled={!canEdit} onChange={(value) => value !== null && updateComponent(selected.id, { properties: { ...selected.properties, capacity: value } }, false)} /></PropertyField>}
+              {selected.type === 'agv' && <PropertyField label="初始电量"><InputNumber value={Number(selected.properties.battery ?? 100)} min={0} max={100} addonAfter="%" disabled={!canEdit} onChange={(value) => value !== null && updateComponent(selected.id, { properties: { ...selected.properties, battery: value } }, false)} /></PropertyField>}
+              <Button danger block icon={<DeleteOutlined />} disabled={!canEdit} onClick={() => deleteComponent(selected.id)}>删除组件</Button>
+            </div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选择一个组件查看属性" />
+          ) : <ValidationPanel validation={validation} validating={validating} onSelect={(id) => { setSelectedId(id); setActiveTab('properties'); }} />}
+          <div className="canvas-settings">
+            <h3>画布设置</h3>
+            <div className="property-grid"><PropertyField label="宽度"><InputNumber value={canvas.width} min={320} max={5000} disabled={!canEdit} onChange={(value) => value !== null && updateCanvas({ width: value })} /></PropertyField><PropertyField label="高度"><InputNumber value={canvas.height} min={240} max={5000} disabled={!canEdit} onChange={(value) => value !== null && updateCanvas({ height: value })} /></PropertyField></div>
+            <PropertyField label="坐标比例"><InputNumber value={canvas.scale} min={0.1} max={10} step={0.1} disabled={!canEdit} onChange={(value) => value !== null && updateCanvas({ scale: value })} /></PropertyField>
+          </div>
+        </aside>
       </div>
 
       <div className="editor-bottom">
-        <SectionCard title="场景概览">
-          <div className="overview-grid">
-            <OverviewItem label="货架数量" value={components.filter((c) => c.type === 'shelf').length} unit="个" subLabel={`占地面积 ${editorOverview.shelvesArea} m²`} />
-            <OverviewItem label="AGV 数量" value={components.filter((c) => c.type === 'agv').length} unit="台" subLabel={`在线 ${components.filter((c) => c.type === 'agv').length - 0} | 离线 0`} />
-            <OverviewItem label="机械臂数量" value={components.filter((c) => c.type === 'arm').length} unit="台" subLabel={`工作站 ${components.filter((c) => c.type === 'station').length} 个`} />
-            <OverviewItem label="工作站数量" value={components.filter((c) => c.type === 'station').length} unit="个" subLabel="拣选 + 包装" />
-            <OverviewItem label="总面积" value={editorOverview.totalArea} unit="m²" subLabel={editorOverview.canvasSize} />
-            <OverviewItem label="可通行率" value={editorOverview.passableRate} unit="%" subLabel={`可通行面积 ${editorOverview.passableArea} m²`} />
-          </div>
-        </SectionCard>
-
-        <SectionCard title="操作记录" extra={<a>全部记录</a>} bodyHeight={180}>
-          <div className="log-list">
-            {logs.map((l, i) => (
-              <div key={i} className="log-row">
-                <span className="log-time num-font">{l.time}</span>
-                <span className="log-user">[{l.user}]</span>
-                <span className="log-action">{l.action}</span>
-                <span className="log-target">{l.target}</span>
-                {l.details && <span className="log-details">({l.details})</span>}
-              </div>
-            ))}
-          </div>
-        </SectionCard>
+        <section className="editor-summary">
+          <SummaryItem label="货架" value={stats.shelves} unit="组" /><SummaryItem label="AGV" value={stats.agvs} unit="台" /><SummaryItem label="机械臂" value={stats.arms} unit="台" /><SummaryItem label="工作站" value={stats.stations} unit="个" /><SummaryItem label="占用面积" value={stats.occupiedArea} unit="px²" /><SummaryItem label="可通行率" value={stats.passableRate} unit="%" />
+        </section>
+        <section className="editor-log"><div className="section-heading"><b>本次编辑记录</b><span>{logs.length} 条</span></div>{logs.length ? logs.map((log, index) => <div className="log-row" key={`${log.time}-${index}`}><time>{log.time}</time><b>{log.action}</b><span>{log.target}</span><small>{log.details}</small></div>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚无编辑操作" />}</section>
       </div>
+
+      <Drawer title="场景版本历史" width={500} open={versionsOpen} onClose={() => setVersionsOpen(false)}>
+        {versionsQuery.isLoading ? <Skeleton active /> : versionsQuery.isError ? <Alert type="error" showIcon message="版本历史加载失败" action={<Button onClick={() => void versionsQuery.refetch()}>重试</Button>} /> : <List dataSource={sortedVersions} locale={{ emptyText: '暂无历史版本' }} renderItem={(version) => <List.Item actions={[<Button key="restore" type="link" disabled={!canEdit || version.version === scenarioVersion} onClick={() => restoreVersion(version)}>{version.version === scenarioVersion ? '当前版本' : '载入快照'}</Button>]}><List.Item.Meta avatar={<div className={`version-dot ${version.version === scenarioVersion ? 'current' : ''}`}>v{version.version}</div>} title={version.name} description={`${version.data.components.length} 个组件 · ${new Date(version.created_at).toLocaleString()}`} /></List.Item>} />}
+      </Drawer>
+
+      <Modal title="添加自定义组件" open={customOpen} onCancel={() => setCustomOpen(false)} onOk={() => { addComponent(customType, customName.trim() || '自定义组件', { width: customWidth, height: customHeight }); setCustomOpen(false); }} okButtonProps={{ disabled: !customName.trim() || customWidth <= 0 || customHeight <= 0 }}>
+        <Space direction="vertical" size={14} style={{ width: '100%' }}><PropertyField label="组件类型"><Select value={customType} onChange={setCustomType} options={Object.entries(typeLabels).map(([value, label]) => ({ value, label }))} /></PropertyField><PropertyField label="名称"><Input value={customName} onChange={(event) => setCustomName(event.target.value)} maxLength={120} /></PropertyField><div className="property-grid"><PropertyField label="宽度"><InputNumber value={customWidth} min={1} max={canvas.width} onChange={(value) => value !== null && setCustomWidth(value)} /></PropertyField><PropertyField label="高度"><InputNumber value={customHeight} min={1} max={canvas.height} onChange={(value) => value !== null && setCustomHeight(value)} /></PropertyField></div></Space>
+      </Modal>
     </div>
   );
 }
 
-function PropRow({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="prop-row">
-      <div className="prop-label">{label}</div>
-      <div className="prop-value">{value}</div>
-    </div>
-  );
+function PropertyField({ label, children }: { label: string; children: React.ReactNode }) {
+  return <label className="property-field"><span>{label}</span>{children}</label>;
 }
 
-function OverviewItem({ label, value, unit, subLabel }: { label: string; value: string | number; unit?: string; subLabel?: string }) {
-  return (
-    <div className="overview-item">
-      <div className="ov-label">{label}</div>
-      <div className="ov-value-row">
-        <span className="ov-value num-font">{value}</span>
-        {unit && <span className="ov-unit">{unit}</span>}
-      </div>
-      {subLabel && <div className="ov-sub">{subLabel}</div>}
-    </div>
-  );
+function ValidationPanel({ validation, validating, onSelect }: { validation: ScenarioValidationRead; validating: boolean; onSelect: (id: string) => void }) {
+  const issues = [...validation.errors.map((issue) => ({ ...issue, severity: 'error' as const })), ...validation.warnings.map((issue) => ({ ...issue, severity: 'warning' as const }))];
+  if (validating) return <Skeleton active paragraph={{ rows: 5 }} />;
+  if (!issues.length) return <div className="validation-success"><CheckCircleOutlined /><b>场景校验通过</b><span>边界、重叠、组件 ID 与数据结构均有效。</span></div>;
+  return <div className="validation-list">{issues.map((issue, index) => <button type="button" key={`${issue.code}-${index}`} className={`validation-item ${issue.severity}`} onClick={() => issue.component_ids[0] && onSelect(issue.component_ids[0])}><span>{issue.severity === 'error' ? <ExclamationCircleOutlined /> : '!'}</span><div><b>{issue.code}</b><p>{issue.message}</p></div></button>)}</div>;
+}
+
+function SummaryItem({ label, value, unit }: { label: string; value: number; unit: string }) {
+  return <div className="summary-item"><span>{label}</span><b>{value}<small>{unit}</small></b></div>;
 }
