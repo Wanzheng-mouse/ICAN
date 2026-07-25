@@ -46,6 +46,7 @@ import {
 } from '@/api/modules/projectApi';
 import { useAppStore } from '@/stores/useAppStore';
 import { getApiErrorMessage } from '@/api/errorMessage';
+import './index.css';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -178,43 +179,53 @@ export default function ProjectsPage() {
     }
   };
 
+  const activeProjects = projects.filter((p) => p.status !== 'archived');
+  const archivedCount = projects.length - activeProjects.length;
+
   return (
-    <div className="page-container" style={{ maxWidth: 1440, margin: '0 auto' }}>
-      <Card variant="borderless" style={{ marginBottom: 18 }}>
-        <Space style={{ width: '100%', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <div>
-            <Title level={2} style={{ margin: 0 }}>项目中心</Title>
-            <Paragraph type="secondary" style={{ margin: '8px 0 0' }}>
-              集中管理需求、场景和输入资料；所有内容均保存到当前账号的真实后端工作区。
-            </Paragraph>
+    <div className="projects-page">
+      <div className="projects-header">
+        <div>
+          <h1>项目中心</h1>
+          <p>集中管理需求、场景和输入资料</p>
+        </div>
+        <Space size="middle">
+          <div className="projects-stats">
+            <div className="stat-item"><div className="num">{activeProjects.length}</div><div className="label">进行中</div></div>
+            <div className="stat-item"><div className="num">{archivedCount}</div><div className="label">已归档</div></div>
+            <div className="stat-item"><div className="num">{projects.length}</div><div className="label">全部项目</div></div>
           </div>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/')} disabled={!canWrite}>
-            创建项目
-          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/')} disabled={!canWrite}>创建项目</Button>
         </Space>
-      </Card>
+      </div>
 
       {isError && <Alert type="error" showIcon message="项目加载失败" action={<Button onClick={() => void refetch()}>重试</Button>} style={{ marginBottom: 16 }} />}
-      {isLoading ? <Skeleton active /> : projects.length === 0 ? (
+      {isLoading ? <Skeleton active paragraph={{ rows: 6 }} /> : projects.length === 0 ? (
         <Card><Empty description="还没有项目"><Button type="primary" onClick={() => navigate('/')} disabled={!canWrite}>创建第一个项目</Button></Empty></Card>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))', gap: 16 }}>
-          {projects.map((project) => (
-            <Card
-              key={project.id}
-              hoverable
-              title={<Space><FolderOpenOutlined style={{ color: '#2563eb' }} /><span>{project.name}</span></Space>}
-              extra={<Tag color={project.status === 'active' ? 'green' : 'blue'}>{project.status === 'draft' ? '草稿' : project.status}</Tag>}
-              actions={[
-                <span key="detail" onClick={() => openWorkspace(project.id)}><EditOutlined /> 管理</span>,
-                <Popconfirm key="archive" title="确认归档该项目？" onConfirm={() => void archiveProject(project.id)} disabled={!canWrite}>
-                  <span style={{ opacity: canWrite ? 1 : 0.45 }}><InboxOutlined /> 归档</span>
-                </Popconfirm>,
-              ]}
-            >
-              <Paragraph ellipsis={{ rows: 2 }} style={{ minHeight: 44 }}>{project.requirement || '暂无需求描述'}</Paragraph>
-              <Text type="secondary">创建于 {new Date(project.created_at).toLocaleString()}</Text>
-            </Card>
+        <div className="project-grid">
+          {activeProjects.concat(projects.filter((p) => p.status === 'archived')).map((project) => (
+            <div key={project.id} className="project-card">
+              <div className="project-card-body">
+                <div className="project-card-header">
+                  <FolderOpenOutlined className="icon" />
+                  <span className="name">{project.name}</span>
+                  <Tag color={project.status === 'active' ? 'green' : project.status === 'draft' ? 'blue' : 'default'}>{project.status === 'draft' ? '草稿' : project.status === 'active' ? '进行中' : '已归档'}</Tag>
+                </div>
+                <div className="desc">{project.requirement || '暂无需求描述'}</div>
+                <div className="meta">创建于 {new Date(project.created_at).toLocaleString()}</div>
+              </div>
+              <div className="project-card-actions">
+                <span className="action-btn" onClick={() => openWorkspace(project.id)}><EditOutlined /> 管理</span>
+                {project.status !== 'archived' ? (
+                  <Popconfirm key="archive" title="确认归档该项目？" onConfirm={() => void archiveProject(project.id)} disabled={!canWrite}>
+                    <span className="action-btn" style={{ opacity: canWrite ? 1 : 0.45 }}><InboxOutlined /> 归档</span>
+                  </Popconfirm>
+                ) : (
+                  <span className="action-btn" style={{ opacity: 0.45 }}><InboxOutlined /> 已归档</span>
+                )}
+              </div>
+            </div>
           ))}
         </div>
       )}
