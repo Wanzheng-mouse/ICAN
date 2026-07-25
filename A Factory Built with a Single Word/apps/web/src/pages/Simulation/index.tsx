@@ -879,14 +879,14 @@ export default function Simulation() {
       ? `/editor?projectId=${encodeURIComponent(projectId)}&scenarioId=${encodeURIComponent(scenarioId)}`
       : '/projects';
     return (
-      <div className="simulation-state-card">
+      <Card style={{ margin: 24, textAlign: 'center', padding: '40px 0' }}>
         <Empty description="尚未创建仿真环境">
-          <p>请在场景编辑器中配置设备与布局，然后点击启动。</p>
+          <p style={{ marginBottom: 16, color: '#64748b' }}>请在场景编辑器中配置设备与布局，然后点击启动。</p>
           <Button type="primary" onClick={() => navigate(editorUrl)}>
             {projectId && scenarioId ? '返回场景编辑器' : '前往项目管理'}
           </Button>
         </Empty>
-      </div>
+      </Card>
     );
   }
 
