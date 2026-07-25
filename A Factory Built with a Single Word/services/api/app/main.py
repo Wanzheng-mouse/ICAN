@@ -60,6 +60,7 @@ from app.models import (
 )
 
 from app.domain import (
+    ScenarioService,
     add_scenario_version, get_current_token, get_current_user,
     get_idempotent_scenario, get_or_404, hash_password, issue_token,
     latest_scenario_version, project_file_to_read, record_audit,
@@ -73,6 +74,10 @@ PREFIX = "/api/v1"
 configure_logging(settings)
 
 logger = logging.getLogger("ican.api")
+
+
+# Scenario service for validation and auto-layout
+scenario_service = ScenarioService()
 
 
 def _utcnow() -> datetime:
@@ -867,6 +872,13 @@ def list_evolution_scenarios(evolution_id: str, user: User = Depends(get_current
 
 # ---- Resource Center ------------------------------------------------------
 
+
+
+@app.get(f"{PREFIX}/resource/hot-resources", tags=["resource"])
+def list_hot_resources(db: Session = Depends(get_db)) -> list[dict]:
+    items = db.query(Template).filter(Template.published.is_(True)).order_by(Template.downloads.desc()).limit(10).all()
+    return [{"rank": i + 1, "name": t.title, "downloads": t.downloads, "views": t.views} for i, t in enumerate(items)]
+
 @app.get(f"{PREFIX}/resource/featured-cases", tags=["resource"])
 def list_featured_cases(db: Session = Depends(get_db)) -> list[dict]:
     return [{"id": c.id, "title": c.title, "description": c.description, "cover": c.cover, "industry": c.industry, **c.metrics} for c in db.query(ResourceCase).filter(ResourceCase.published.is_(True)).all()]
@@ -911,7 +923,7 @@ def analyze_requirement(payload: RequirementAnalyzeCreate, user: User = Depends(
     job.status = "analyzed"
     db.commit()
     db.refresh(job)
-    return RequirementAnalysisRead(job_id=job.id, summary=job.analysis.get("summary", "需求已分析"), profile=job.analysis.get("profile", profile), assumptions=job.analysis.get("assumptions", []), questions=job.analysis.get("questions", []), risks=job.analysis.get("risks", []), confidence=job.analysis.get("confidence", 85), operational_design=job.analysis.get("operational_design", {}), candidate_guidance=job.analysis.get("candidate_guidance", []))
+    return RequirementAnalysisRead(job_id=job.id, status=job.status, summary=job.analysis.get("summary", "需求已分析"), profile=job.analysis.get("profile", profile), assumptions=job.analysis.get("assumptions", []), questions=job.analysis.get("questions", []), risks=job.analysis.get("risks", []), confidence=job.analysis.get("confidence", 85), operational_design=job.analysis.get("operational_design", {}), candidate_guidance=job.analysis.get("candidate_guidance", []))
 
 
 @app.post(f"{PREFIX}/generation/{{job_id}}/candidates", response_model=GenerationCandidatesRead, tags=["generation"])
@@ -1044,11 +1056,46 @@ def dashboard_kpis(user: User = Depends(get_current_user), db: Session = Depends
     project_count = db.query(Project).join(ProjectMembership, ProjectMembership.project_id == Project.id).filter(ProjectMembership.user_id == user.id).count()
     scenario_count = db.query(Scenario).count()
     sim_count = db.query(SimulationRun).count()
-    avg_rate = db.query(func.avg(SimulationRun.metrics["completion_rate"].as_string().cast(db.bind.dialect.FLOAT))).filter(SimulationRun.status == "completed").scalar() or 0
+    # SQLite-compatible: extract float from JSON text field
+    avg_rate = 0.0
+    for run in db.query(SimulationRun).filter(SimulationRun.status == "completed").all():
+        rate = (run.metrics or {}).get("completion_rate")
+        if rate is not None:
+            avg_rate = (avg_rate or 0) + float(rate)
+    if avg_rate and db.query(SimulationRun).filter(SimulationRun.status == "completed").count() > 0:
+        avg_rate /= db.query(SimulationRun).filter(SimulationRun.status == "completed").count()
     return {"projects": project_count, "scenarios": scenario_count, "simulations": sim_count, "average_completion_rate": round(float(avg_rate), 2)}
 
 
 # ---- Notifications --------------------------------------------------------
+
+
+
+@app.websocket(f"{PREFIX}/notifications/stream")
+async def stream_notifications(websocket: WebSocket, token: str | None = None) -> None:
+    await websocket.accept()
+    with SessionLocal() as db:
+        stored = db.get(AuthToken, token) if token else None
+        user = db.get(User, stored.user_id) if stored and stored.expires_at >= _utcnow() else None
+    if user is None:
+        await websocket.send_json({"type": "error", "message": "Authentication required"})
+        await websocket.close(code=4401)
+        return
+    try:
+        while True:
+            with SessionLocal() as db:
+                notes = db.query(Notification).filter(Notification.user_id == user.id, Notification.read.is_(False)).order_by(Notification.created_at.desc()).limit(10).all()
+                total = db.query(Notification).filter(Notification.user_id == user.id).count()
+                unread = db.query(Notification).filter(Notification.user_id == user.id, Notification.read.is_(False)).count()
+                await websocket.send_json({"type": "notification_changed", "items": [{"id": n.id, "type": n.type, "title": n.title, "content": n.content, "target_url": n.target_url, "created_at": str(n.created_at)} for n in notes], "total": total, "unread": unread})
+            try:
+                await asyncio.wait_for(websocket.receive_text(), timeout=30)
+            except asyncio.TimeoutError:
+                continue
+            except WebSocketDisconnect:
+                break
+    except Exception:
+        pass
 
 @app.get(f"{PREFIX}/notifications", tags=["notifications"])
 def list_notifications(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> list[dict]:

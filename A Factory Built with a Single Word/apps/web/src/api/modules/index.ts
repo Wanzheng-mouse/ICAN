@@ -17,3 +17,8 @@ export * from './orchestrationApi';
 export * from './orchestrationTypes';
 export * from './resourceApi';
 export * from './authApi';
+export * from './searchApi';
+export * from './notificationApi';
+export * from './auditApi';
+export * from './dashboardApi';
+export * from './generationApi';
