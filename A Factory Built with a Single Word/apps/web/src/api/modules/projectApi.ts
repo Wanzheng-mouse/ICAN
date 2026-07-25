@@ -1,13 +1,13 @@
 /**
  * 项目 / 模板 API（带 React Hooks 封装）
  */
-import { useQuery, type UseQueryResult } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type UseMutationResult, type UseQueryResult } from '@tanstack/react-query';
 import { request } from '@/api/client';
 import { USE_MOCK } from '@/api/client';
 import { apiUrl } from '@/utils/apiUrl';
 import { scenarioTemplates as mockTemplates, templateCards as mockCards, featureItems as mockFeatures, generationSteps as mockSteps, editorSceneComponents as mockComponents, uploadItems as mockUploadItems } from '@ican/mock-data';
 import type { FeatureItem, GenerationStep, SceneTemplate, TemplateCard, UploadItem } from '@ican/contracts';
-import type { ProjectCreate, ProjectFileRead, ProjectRead, ProjectWorkspaceRead, ScenarioRead, TemplateApplyCreate, TemplateDetailRead } from '@/api/dtos/backend';
+import type { ProjectCreate, ProjectFileRead, ProjectMemberRead, ProjectMemberUpsert, ProjectRead, ProjectUpdate, ProjectWorkspaceRead, ScenarioRead, TemplateApplyCreate, TemplateDetailRead } from '@/api/dtos/backend';
 
 export async function getTemplates(category?: string): Promise<SceneTemplate[]> {
   if (USE_MOCK) return mockTemplates;
@@ -60,6 +60,29 @@ export async function deleteProjectFile(projectId: string, fileId: string): Prom
 
 export async function downloadProjectFile(file: { download_url: string }): Promise<Response> {
   return request({ url: file.download_url, method: 'GET' });
+}
+
+export async function removeProjectMember(projectId: string, userId: string): Promise<void> {
+  return request({ url: apiUrl(`/projects/${projectId}/members/${userId}`), method: 'DELETE' });
+}
+
+export async function upsertProjectMember(projectId: string, payload: ProjectMemberUpsert): Promise<ProjectMemberRead> {
+  return request({ url: apiUrl(`/projects/${projectId}/members`), method: 'POST', data: payload });
+}
+
+export function useProjectMembers(projectId: string): UseQueryResult<ProjectMemberRead[]> {
+  return useQuery({ queryKey: ['project-members', projectId], queryFn: () => request({ url: apiUrl(`/projects/${projectId}/members`) }), enabled: Boolean(projectId) });
+}
+
+export function useUpdateProject(): UseMutationResult<ProjectRead, Error, { id: string; changes: ProjectUpdate }> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, changes }) => request({ url: apiUrl(`/projects/${id}`), method: 'PATCH', data: changes }),
+    onSuccess: (_project, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ['projects'] });
+      void queryClient.invalidateQueries({ queryKey: ['project-workspace', variables.id] });
+    },
+  });
 }
 
 export const homeStaticData = {
