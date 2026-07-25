@@ -33,8 +33,8 @@ export function useTemplates(category?: string): UseQueryResult<SceneTemplate[]>
   return useQuery({ queryKey: ['templates', category], queryFn: () => getTemplates(category) });
 }
 
-export async function getProjects(): Promise<ProjectRead[]> {
-  return request({ url: apiUrl('/projects') });
+export async function getProjects(includeArchived = false): Promise<ProjectRead[]> {
+  return request({ url: apiUrl('/projects'), params: { include_archived: includeArchived } });
 }
 
 export async function getProjectWorkspace(id: string): Promise<ProjectWorkspaceRead> {

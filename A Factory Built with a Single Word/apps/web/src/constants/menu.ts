@@ -7,6 +7,7 @@ export interface TopMenuItem {
 
 export const TOP_MENUS: TopMenuItem[] = [
   { key: 'home', label: '首页', path: '/' },
+  { key: 'projects', label: '项目中心', path: '/projects' },
   { key: 'simulation', label: '仿真空间', path: '/simulation' },
   { key: 'evolution', label: '方案进化', path: '/evolution' },
   { key: 'report', label: '运行报告', path: '/report' },

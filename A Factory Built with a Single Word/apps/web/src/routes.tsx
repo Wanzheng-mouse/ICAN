@@ -16,6 +16,7 @@ const Resource = lazy(() => import('@/pages/Resource'));
 const Orchestration = lazy(() => import('@/pages/Orchestration'));
 const Editor = lazy(() => import('@/pages/Editor'));
 const Help = lazy(() => import('@/pages/Help'));
+const ProjectsPage = lazy(() => import('@/pages/Projects'));
 const SearchPage = lazy(() => import('@/pages/Search'));
 const NotificationsPage = lazy(() => import('@/pages/Notifications'));
 const ProfilePage = lazy(() => import('@/pages/Account/Profile'));
@@ -44,6 +45,10 @@ export function AppRoutes() {
         {/* 首页（需登录） */}
         <Route path="/" element={<RequireAuth><MainLayout><Home /></MainLayout></RequireAuth>} />
         <Route path="/help" element={<RequireAuth><MainLayout><Help /></MainLayout></RequireAuth>} />
+
+        {/* 项目中心 */}
+        <Route path="/projects" element={<RequireAuth><MainLayout variant="wide"><ProjectsPage /></MainLayout></RequireAuth>} />
+        <Route path="/projects/:projectId" element={<RequireAuth><MainLayout variant="wide"><ProjectsPage /></MainLayout></RequireAuth>} />
 
         {/* 搜索 & 通知 */}
         <Route path="/search" element={<RequireAuth><MainLayout><SearchPage /></MainLayout></RequireAuth>} />
