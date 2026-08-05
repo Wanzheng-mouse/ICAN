@@ -1,0 +1,31 @@
+# gitleaks configuration for ICAN (M6, 2026-07-26)
+# Extends the gitleaks default rule set and allowlists the paths/patterns
+# that are intentional placeholders or non-sensitive fixtures, so the CI
+# secret-scan job does not produce false positives.
+title = "ICAN gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Intentional placeholders and non-sensitive paths"
+paths = [
+  '''(?i).*/node_modules/.*''',
+  '''(?i).*/\.venv/.*''',
+  '''(?i).*/\.git/.*''',
+  '''(?i).*/package-lock\.json''',
+  '''(?i).*/pnpm-lock\.yaml''',
+  '''(?i).*/\.env\.example''',
+  '''(?i).*/\.env\.test''',
+  '''(?i).*\.test\.(ts|tsx)''',
+  '''(?i).*mock.*''',
+  '''(?i).*/design-audit-report\.md''',
+  '''(?i).*/docs/audit/.*''',
+]
+regexes = [
+  # Our documented placeholder / example values (never real secrets)
+  '''REPLACE_WITH_NEWLY_ROTATED_KEY''',
+  '''your-agnes-api-key''',
+  '''test-key''',
+  '''sk-[A-Za-z0-9_-]{0,19}''',
+]

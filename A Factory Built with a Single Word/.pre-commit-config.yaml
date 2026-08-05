@@ -1,0 +1,61 @@
+# Pre-commit hooks for ICAN (M1, 2026-07-26)
+# Local guardrail that mirrors the CI `api` (ruff) job so lint errors are
+# caught *before* they ever reach a commit / push.
+#
+# Why `local` repos + no-space wrappers:
+#   - The published gitleaks pre-commit hook builds from Go source and needs
+#     network access at install time; CI already runs gitleaks via
+#     gitleaks-action (which has network), so secret scanning is covered there.
+#   - The published ruff/pre-commit-hooks images trigger an aggressive
+#     "safe-delete" COM wrapper on this machine that panics. Using a `local`
+#     repo that calls a no-space wrapper binary avoids the pre-commit
+#     whitespace-tokenizer problem entirely.
+#   - All code lives under "A Factory Built with a Single Word" (git root is
+#     E:/UJN/ICAN), so file globs are git-root-relative.
+#
+# Wrappers (already created):
+#   E:/UJN/ICAN/.pcbin/ruff.exe        -> project venv ruff (self-contained)
+#   E:/UJN/ICAN/.pcbin/pyrun.cmd         -> project venv python.exe
+#
+# Setup (one time):
+#   cd "A Factory Built with a Single Word"
+#   python -m venv .venv && .venv/Scripts/activate
+#   pip install pre-commit ruff pyyaml
+#   pre-commit install
+#
+# Run against everything once:
+#   pre-commit run --all-files
+
+default_install_hook_types: [pre-commit]
+
+repos:
+  # --- Python lint (parallel to CI `api` ruff job) ---
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff (lint)
+        entry: E:/UJN/ICAN/.pcbin/ruff.exe
+        language: system
+        files: ^A Factory Built with a Single Word/services/api/app/
+        args: ["check", "--fix", "--exit-non-zero-on-fix", "--no-cache"]
+      - id: ruff-format
+        name: ruff-format (format)
+        entry: E:/UJN/ICAN/.pcbin/ruff.exe
+        language: system
+        files: ^A Factory Built with a Single Word/services/api/app/
+        args: ["format", "--no-cache"]
+
+  # --- Local hygiene (no external image, no file deletion) ---
+  - repo: local
+    hooks:
+      - id: no-trailing-whitespace
+        name: no trailing whitespace
+        entry: E:/UJN/ICAN/.pcbin/no_ws.cmd
+        language: system
+        types: [text]
+        exclude: ^.*\.(md|drawio)$
+      - id: check-yaml
+        name: check yaml
+        entry: E:/UJN/ICAN/.pcbin/check_yaml.cmd --allow-multiple-documents
+        language: system
+        types: [yaml]

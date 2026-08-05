@@ -1,0 +1,16 @@
+# Ruff configuration for ICAN (M1, 2026-07-26)
+# Used by both the local pre-commit `ruff` hook and the CI `api` job
+# (`ruff check app`). Kept intentionally small and FastAPI-friendly.
+
+line-length = 100
+target-version = "py311"
+
+[lint]
+# B008 (function call in argument default) is the standard FastAPI `Depends`
+# pattern and is a false positive for this codebase — ignore it project-wide,
+# matching FastAPI's own guidance.
+extend-ignore = ["B008"]
+
+[lint.per-file-ignores]
+# Tests may use broad exceptions / magic values intentionally.
+"**/tests/**" = ["PLR2004", "S101", "ARG001", "ARG002"]
