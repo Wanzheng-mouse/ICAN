@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Button, Form, Input, Typography, message } from 'antd';
 import { ArrowLeftOutlined, LockOutlined, MailOutlined, UserOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { mockRegister } from '@/api/modules';
+import { register as registerUser } from '@/api/modules';
 import { useAppStore } from '@/stores/useAppStore';
 import './Login.css';
 
@@ -16,7 +16,7 @@ export default function RegisterPage() {
   const handleFinish = async (values: { loginName: string; name: string; email: string; password: string; confirmPassword: string }) => {
     setLoading(true);
     try {
-      const result = await mockRegister(values);
+      const result = await registerUser(values);
       login(result.user, result.token, true);
       message.success('注册成功，已为你进入工作台');
       navigate('/', { replace: true });

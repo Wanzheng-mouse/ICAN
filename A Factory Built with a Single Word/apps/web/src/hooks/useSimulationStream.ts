@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { isMockEnabled } from '@/api/mockConfig';
 import { WsClient } from '@/api/ws';
 import type { SimulationTickRead } from '@/api/dtos/backend';
 import { useAppStore } from '@/stores/useAppStore';
@@ -42,31 +41,6 @@ export function resolveSimulationWsUrl(simulationId: string, token?: string | nu
   return `${protocol}//${window.location.host}${apiPrefix}/simulations/${simulationId}/stream${suffix}`;
 }
 
-function mockTick(simulationId: string, elapsed: number): SimulationTickRead {
-  const robotCount = 10;
-  const total = 20;
-  const completion = Math.min(1, elapsed * robotCount / (total * 10));
-  return {
-    type: 'simulation_tick',
-    run_id: simulationId,
-    time: elapsed,
-    robots: Array.from({ length: robotCount }, (_, index) => ({
-      id: `agv-${String(index + 1).padStart(2, '0')}`,
-      state: elapsed ? 'working' : 'idle',
-      battery: Math.max(20, 100 - elapsed),
-    })),
-    tasks: { total, completed: Math.round(total * completion) },
-    events: [],
-    metrics: {
-      completion_rate: completion,
-      average_duration: 120 - completion * 20,
-      congestion_count: 0,
-      energy: elapsed * robotCount * 0.12,
-    },
-    generated_at: new Date().toISOString(),
-  };
-}
-
 export function useSimulationStream(
   simulationId?: string | null,
   enabled = true,
@@ -100,19 +74,6 @@ export function useSimulationStream(
     if (!simulationId || !enabled) {
       setConnectionState('idle');
       return;
-    }
-
-    if (isMockEnabled('simulation')) {
-      let elapsed = 0;
-      setConnectionState('connected');
-      const publish = () => {
-        const next = mockTick(simulationId, elapsed++);
-        setTick(next);
-        setLastReceivedAt(next.generated_at);
-      };
-      publish();
-      const timer = window.setInterval(publish, 1000);
-      return () => window.clearInterval(timer);
     }
 
     let disposed = false;

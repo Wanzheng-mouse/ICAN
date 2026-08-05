@@ -1,31 +1,40 @@
 import { useState } from 'react';
-import { Layout, Menu, Badge, type MenuProps } from 'antd';
+import { Layout, Menu, type MenuProps } from 'antd';
 import {
   AlertOutlined,
   BarChartOutlined,
+  ClusterOutlined,
   DesktopOutlined,
   DoubleLeftOutlined,
   DoubleRightOutlined,
   EnvironmentOutlined,
   FileTextOutlined,
   NodeIndexOutlined,
-  RobotOutlined,
   SettingOutlined,
-  ThunderboltOutlined,
   UnorderedListOutlined,
 } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/stores/useAppStore';
-import { useNotifications, useProjects } from '@/api/modules';
+import { useProjects, useSimulationDetail } from '@/api/modules';
 import { MainLayout } from './MainLayout';
 import './ConsoleLayout.css';
 
 const { Sider } = Layout;
 
-const MENU_GROUPS: Array<{ group: string; icon: React.ReactNode; items: Array<{ key: string; label: string; icon: React.ReactNode; path: string; badge?: number }> }> = [
+interface MenuItem {
+  key: string;
+  label: string;
+  icon: React.ReactNode;
+  path: string;
+}
+interface MenuGroup {
+  group: string;
+  items: MenuItem[];
+}
+
+const MENU_GROUPS: MenuGroup[] = [
   {
-    group: '运行中心',
-    icon: <ThunderboltOutlined />,
+    group: '运行',
     items: [
       { key: 'simulation', label: '数字孪生', icon: <EnvironmentOutlined />, path: '/simulation' },
       { key: 'tasks', label: '任务管理', icon: <UnorderedListOutlined />, path: '/simulation/tasks' },
@@ -33,119 +42,150 @@ const MENU_GROUPS: Array<{ group: string; icon: React.ReactNode; items: Array<{ 
     ],
   },
   {
-    group: '资产运营',
-    icon: <RobotOutlined />,
+    group: '资产',
     items: [
       { key: 'devices', label: '设备管理', icon: <DesktopOutlined />, path: '/simulation/devices' },
       { key: 'agents', label: '智能体协同', icon: <NodeIndexOutlined />, path: '/simulation/agents' },
     ],
   },
   {
-    group: '监控分析',
-    icon: <BarChartOutlined />,
+    group: '洞察',
     items: [
-      { key: 'alerts', label: '告警中心', icon: <AlertOutlined />, path: '/simulation/alerts', badge: 3 },
+      { key: 'alerts', label: '告警中心', icon: <AlertOutlined />, path: '/simulation/alerts' },
       { key: 'dashboard', label: '数据看板', icon: <BarChartOutlined />, path: '/simulation/dashboard' },
     ],
   },
   {
     group: '系统',
-    icon: <SettingOutlined />,
     items: [
-      { key: 'settings', label: '设置', icon: <SettingOutlined />, path: '/simulation/settings' },
+      { key: 'settings', label: '系统设置', icon: <SettingOutlined />, path: '/simulation/settings' },
     ],
   },
 ];
 
+const NAV_HINT_KEY = 'console-sider-collapsed';
+
 export function ConsoleLayout() {
   const [collapsed, setCollapsed] = useState(
-    () => localStorage.getItem('console-sider-collapsed') === 'true',
+    () => localStorage.getItem(NAV_HINT_KEY) === 'true',
   );
   const navigate = useNavigate();
   const location = useLocation();
   const currentProjectId = useAppStore((s) => s.currentProjectId);
   const currentSimulationId = useAppStore((s) => s.currentSimulationId);
   const simulationConnectionState = useAppStore((s) => s.simulationConnectionState);
+  // The sidebar's job is to navigate and to surface a one-glance status pill.
+  // Numbers (AGV / 任务 / 告警) live in the digital-twin 3D view and the
+  // overview cards in the index pages; duplicating them here makes the layout
+  // feel noisy without giving the user anything they cannot get from the
+  // three-line status pill below.
   const { data: projects = [] } = useProjects();
-  const { data: notifications = [] } = useNotifications();
+  const { data: simulationDetail } = useSimulationDetail(currentSimulationId);
   const currentProject = projects.find((project) => project.id === currentProjectId);
+  const collapse = (next: boolean) => {
+    setCollapsed(next);
+    localStorage.setItem(NAV_HINT_KEY, String(next));
+  };
 
-  const alertCount = notifications.filter((item) => item.type === 'alert' && !item.read).length;
+  const simulationStatusLabel = (() => {
+    const status = simulationDetail?.status;
+    if (status === 'running') return { label: '运行中', cls: 'is-running' };
+    if (status === 'paused') return { label: '已暂停', cls: 'is-paused' };
+    if (status === 'stopped') return { label: '已停止', cls: 'is-stopped' };
+    if (status === 'finished') return { label: '已完成', cls: 'is-finished' };
+    if (status === 'created') return { label: '待启动', cls: 'is-draft' };
+    return { label: '未选择仿真', cls: 'is-idle' };
+  })();
   const connectionMeta = simulationConnectionState === 'connected'
-    ? { className: 'online', label: '实时数据流已连接' }
+    ? { className: 'online', label: '实时已连接' }
     : simulationConnectionState === 'reconnecting'
-      ? { className: 'warning', label: '实时数据流重连中' }
+      ? { className: 'warning', label: '正在重连...' }
       : simulationConnectionState === 'error'
-        ? { className: 'offline', label: '实时数据流连接异常' }
-        : { className: 'offline', label: currentSimulationId ? '正在建立实时连接' : '请先选择仿真运行' };
+        ? { className: 'offline', label: '连接异常' }
+        : { className: 'idle', label: currentSimulationId ? '建立连接...' : '未选择仿真' };
 
-  const allItems = MENU_GROUPS.flatMap((g) => g.items);
+  const allItems: MenuItem[] = MENU_GROUPS.flatMap((g) => g.items);
   const activeKey = allItems.find((m) => location.pathname === m.path)?.key ?? 'simulation';
 
   const menuItems: MenuProps['items'] = MENU_GROUPS.map((g) => ({
     key: g.group,
-    label: collapsed ? undefined : (
-      <span className="sider-group-label">{g.group}</span>
-    ),
+    label: collapsed ? undefined : <span className="sider-group-label">{g.group}</span>,
     type: 'group' as const,
     children: g.items.map((item) => ({
       key: item.key,
       icon: item.icon,
-      label: collapsed ? undefined : (
-        <span className="sider-item-label">
-          {item.label}
-          {(item.key === 'alerts' ? alertCount : item.badge) ? <Badge count={item.key === 'alerts' ? alertCount : item.badge} size="small" style={{ marginLeft: 6 }} /> : null}
-        </span>
-      ),
+      label: collapsed ? undefined : <span className="sider-item-label"><span>{item.label}</span></span>,
     })),
   }));
+
+  const goToProject = () => {
+    if (currentProjectId) navigate(`/projects/${currentProjectId}`);
+  };
 
   return (
     <MainLayout variant="wide">
       <Layout className="ican-console-layout">
         <Sider
-          width={220}
+          width={244}
           collapsedWidth={72}
           collapsible
           collapsed={collapsed}
-          onCollapse={(v) => { setCollapsed(v); localStorage.setItem('console-sider-collapsed', String(v)); }}
+          onCollapse={collapse}
           trigger={null}
-          className="ican-console-sider"
+          className={`ican-console-sider ${collapsed ? 'collapsed' : ''}`}
         >
-          {/* 当前状态 */}
+          {/* 项目上下文（轻量定位指示） */}
           {!collapsed && (
-            <div className="sider-project-info">
-              <div className="sider-project-name">当前项目</div>
-              <div className="sider-project-id" style={{ cursor: 'pointer' }} onClick={() => currentProjectId && navigate(`/projects/${currentProjectId}`)}>{currentProject?.name ?? (currentProjectId ? `项目 ${currentProjectId.slice(0, 12)}…` : '未选择项目')}</div>
-              {currentSimulationId && (
-                <div className="sider-project-id" style={{ fontSize: 11, color: '#64748b' }}>
-                  仿真 {currentSimulationId.slice(0, 12)}…
-                </div>
-              )}
+            <div
+              className="sider-context"
+              onClick={goToProject}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => { if (e.key === 'Enter') goToProject(); }}
+              title={currentProject?.name ?? '暂未选择项目，前往项目中心'}
+            >
+              <ClusterOutlined className="sider-context-icon" />
+              <div className="sider-context-text">
+                <span className="sider-context-eyebrow">CURRENT PROJECT</span>
+                <span className="sider-context-name">
+                  {currentProject?.name ?? '未选择项目'}
+                </span>
+                <span className="sider-context-status">
+                  <span className={`sider-status-dot ${connectionMeta.className}`} />
+                  {connectionMeta.label}
+                </span>
+              </div>
             </div>
           )}
 
-          <Menu
-            mode="inline"
-            theme="dark"
-            selectedKeys={[activeKey]}
-            items={menuItems}
-            onClick={({ key }) => {
-              const target = allItems.find((m) => m.key === key);
-              if (target) navigate(`${target.path}${location.search}`);
-            }}
-            className="ican-side-menu"
-          />
+          {/* 主导航菜单（精简：无重复数字指标） */}
+          <div className="sider-menu-wrap">
+            <Menu
+              mode="inline"
+              theme="dark"
+              selectedKeys={[activeKey]}
+              items={menuItems}
+              onClick={({ key }) => {
+                const target = allItems.find((m) => m.key === key);
+                if (target) navigate(`${target.path}${location.search}`);
+              }}
+              className="ican-side-menu"
+            />
+          </div>
 
-          {/* 底部状态栏 */}
+          {/* 底部状态：仿真运行态 + 折叠控制 */}
           <div className="sider-footer">
-            {!collapsed && (
-              <div className="sider-status">
-                <span className={`sider-status-dot ${connectionMeta.className}`} />
-                <span className="sider-status-text">{connectionMeta.label}</span>
-              </div>
-            )}
-            <div className="sider-collapse-btn" onClick={() => { const next = !collapsed; setCollapsed(next); localStorage.setItem('console-sider-collapsed', String(next)); }} title={collapsed ? '展开侧栏' : '收起侧栏'}>
+            <div className="sider-run-state">
+              <span className={`sider-status-pill ${simulationStatusLabel.cls}`}>
+                <i />
+                {simulationStatusLabel.label}
+              </span>
+            </div>
+            <div
+              className="sider-collapse-btn"
+              onClick={() => collapse(!collapsed)}
+              title={collapsed ? '展开侧栏' : '收起侧栏'}
+            >
               {collapsed ? <DoubleRightOutlined /> : <DoubleLeftOutlined />}
             </div>
           </div>

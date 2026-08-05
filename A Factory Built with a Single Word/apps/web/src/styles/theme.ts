@@ -3,10 +3,13 @@ import { theme as antdTheme, type ThemeConfig } from 'antd';
 /**
  * Ant Design 主题 - 贴近原型的深蓝科技感
  */
-export type ThemeMode = 'light' | 'dark';
+export type ThemeMode = 'light' | 'dark' | 'system';
 
 export function createTheme(mode: ThemeMode): ThemeConfig {
-  const dark = mode === 'dark';
+  const resolvedMode = mode === 'system'
+    ? (window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+    : mode;
+  const dark = resolvedMode === 'dark';
   return {
   algorithm: dark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
   token: {

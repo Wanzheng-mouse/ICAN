@@ -152,15 +152,6 @@ export default function Editor() {
   const effectiveProjectId = scenarioQuery.data?.project_id || contextProjectId;
   const localValidation = useMemo(() => validateSceneLocally(components, canvas), [components, canvas]);
   const stats = useMemo(() => sceneOverview(components, canvas), [components, canvas]);
-  const appliedStrategy = useMemo(() => {
-    const value = components.find((component) => typeof component.properties?.layout_strategy === 'string')?.properties?.layout_strategy;
-    const labels: Record<string, string> = {
-      balanced: '均衡调度方案',
-      throughput: '峰值吞吐方案',
-      energy_saver: '节能优化方案',
-    };
-    return typeof value === 'string' ? labels[value] ?? value : null;
-  }, [components]);
   const invalidIds = useMemo(
     () => new Set(validation.errors.flatMap((issue) => issue.component_ids)),
     [validation.errors],
@@ -511,7 +502,7 @@ export default function Editor() {
         // editor's AGV components.
         order_count: Math.max(30, agvCount * 8),
         random_seed: Date.now() % 2_147_483_647,
-        scenario_version: currentVersion,
+        scenario_version: currentVersion ?? undefined,
       });
       setProjectContext({ projectId: effectiveProjectId, scenarioId, simulationId: run.id });
       if (!effectiveProjectId) {

@@ -63,6 +63,16 @@ export interface ChangePasswordPayload {
   new_password: string;
 }
 
+export interface ForgotPasswordPayload {
+  email: string;
+}
+
+export interface ForgotPasswordResponse {
+  message: string;
+  /** 仅当后端 ICAN_EXPOSE_RESET_TOKEN=true 时返回，开发环境调试用 */
+  reset_token?: string;
+}
+
 export interface UpdateProfilePayload {
   name?: string;
   avatar?: string;
@@ -128,6 +138,16 @@ export async function changePassword(payload: ChangePasswordPayload): Promise<vo
       old_password: payload.old_password,
       new_password: payload.new_password,
     },
+  });
+}
+
+export async function requestPasswordReset(
+  payload: ForgotPasswordPayload,
+): Promise<ForgotPasswordResponse> {
+  return request<ForgotPasswordResponse>({
+    url: apiUrl('/auth/forgot-password'),
+    method: 'POST',
+    data: { email: payload.email },
   });
 }
 

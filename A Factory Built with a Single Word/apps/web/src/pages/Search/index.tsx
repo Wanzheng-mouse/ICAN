@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Input, List, Skeleton, Tag, Button, Segmented } from 'antd';
 import { FolderOutlined, ExperimentOutlined, FundOutlined, AppstoreOutlined, HomeOutlined } from '@ant-design/icons';
 import { SectionCard } from '@/components';
-import { searchIndex, type SearchResult } from '@/stores/searchIndex';
+import type { SearchResult } from '@/stores/searchIndex';
+import { useAdvancedPlatformSearch } from '@/api/modules';
 import './Search.css';
 
 const typeIcon: Record<string, React.ReactNode> = {
@@ -24,30 +25,20 @@ export default function SearchPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const q = searchParams.get('q') ?? '';
-  const [loading, setLoading] = useState(true);
-  const [results, setResults] = useState<SearchResult[]>([]);
   const [typeFilter, setTypeFilter] = useState<string>('all');
-
-  useEffect(() => {
-    if (!q.trim()) { setLoading(false); setResults([]); return; }
-    setLoading(true);
-    const timer = setTimeout(() => {
-      setResults(searchIndex(q));
-      setLoading(false);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [q]);
+  const searchQuery = useAdvancedPlatformSearch(q, typeFilter);
+  const results: SearchResult[] = searchQuery.data?.items ?? [];
+  const loading = searchQuery.isLoading || searchQuery.isFetching;
 
   const filtered = useMemo(() => {
-    if (typeFilter === 'all') return results;
-    return results.filter((r) => r.type === typeFilter);
-  }, [results, typeFilter]);
+    return results;
+  }, [results]);
 
   const typeCounts = useMemo(() => {
-    const counts: Record<string, number> = { all: results.length };
-    results.forEach((r) => { counts[r.type] = (counts[r.type] ?? 0) + 1; });
+    const counts: Record<string, number> = { ...searchQuery.data?.type_counts, all: searchQuery.data?.total ?? results.length };
+    results.forEach((r) => { counts[r.type] = counts[r.type] ?? 0; });
     return counts;
-  }, [results]);
+  }, [results, searchQuery.data]);
 
   return (
     <div className="search-page">

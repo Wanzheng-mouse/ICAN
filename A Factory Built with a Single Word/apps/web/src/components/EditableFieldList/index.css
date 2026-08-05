@@ -1,0 +1,98 @@
+.editable-field-list {
+  border-color: #dbe4f0;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #ffffff, #f6f9ff);
+  box-shadow: 0 12px 28px rgba(31, 64, 120, .055);
+  transition: box-shadow .25s ease, border-color .25s ease;
+}
+.editable-card-title { display: flex; flex-direction: column; gap: 2px; }
+.editable-card-eyebrow { color: #5578ae; font-size: 10px; font-weight: 800; letter-spacing: .15em; }
+.editable-card-title-text { color: #1d2939; font-size: 14px; font-weight: 600; }
+.editable-card-desc { margin: 0 0 14px; color: #6b7587; font-size: 12px; line-height: 1.6; }
+
+.editable-body { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 22px; }
+.editable-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f7faff;
+  transition: background .2s ease, box-shadow .2s ease;
+}
+.editable-row-full { grid-column: 1 / -1; }
+.editable-row-lg { grid-column: 1 / -1; }
+/* 保存瞬间：绿色脉冲，强调“已落地” */
+.editable-row.is-saved {
+  box-shadow: inset 0 0 0 1px #22c55e, 0 0 0 3px rgba(34, 197, 94, .14);
+  animation: editable-save-flash .9s ease-out;
+}
+@keyframes editable-save-flash {
+  0% { box-shadow: inset 0 0 0 1px #22c55e, 0 0 0 4px rgba(34, 197, 94, .22); }
+  100% { box-shadow: inset 0 0 0 1px transparent, 0 0 0 0 transparent; }
+}
+
+.editable-row-label { display: flex; align-items: center; gap: 4px; color: #667085; font-size: 11px; font-weight: 600; letter-spacing: .03em; }
+.editable-row-hint { cursor: help; color: #9ca3af; }
+.editable-row-control { min-width: 0; }
+
+/* 显示态：整块可点击，hover 显示铅笔 + 浅蓝底，暗示“可编辑” */
+.editable-display {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  cursor: text;
+  font: inherit;
+  text-align: left;
+  transition: background .15s ease, border-color .15s ease, box-shadow .15s ease;
+}
+.editable-display:hover {
+  background: #eef4ff;
+  border-color: #cfe0ff;
+  box-shadow: inset 0 0 0 1px #dbe8ff;
+}
+.editable-display:focus-visible { outline: 2px solid #2563eb; outline-offset: 1px; }
+.editable-pencil {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: #93a4c4;
+  opacity: 0;
+  transform: translateX(-3px);
+  transition: opacity .15s ease, transform .15s ease;
+}
+.editable-display:hover .editable-pencil,
+.editable-display:focus-visible .editable-pencil { opacity: 1; transform: translateX(0); }
+
+.editable-display-value { color: #1d2939; font-size: 13px; font-weight: 500; word-break: break-word; }
+.editable-display-value.is-empty { color: #b3bac8; font-style: italic; font-weight: 400; }
+
+/* 编辑态控件：统一蓝色聚焦环 */
+.editable-input { width: 100%; }
+.editable-input.ant-input,
+.editable-input.ant-input-number,
+.editable-input.ant-select {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, .12);
+}
+
+/* 行级内联编辑（表格单元格 / 卡片内嵌） */
+.inline-editable { display: inline-flex; width: 100%; }
+.inline-editable.is-saved .editable-display {
+  border-color: #22c55e;
+  box-shadow: inset 0 0 0 1px #22c55e, 0 0 0 3px rgba(34, 197, 94, .14);
+  animation: editable-save-flash .9s ease-out;
+}
+.inline-editable .editable-display { padding: 5px 8px; }
+.inline-editable .editable-display-value { font-size: 12px; }
+
+@media (max-width: 860px) {
+  .editable-body { grid-template-columns: 1fr; }
+  .editable-row-lg, .editable-row-full { grid-column: 1; }
+}

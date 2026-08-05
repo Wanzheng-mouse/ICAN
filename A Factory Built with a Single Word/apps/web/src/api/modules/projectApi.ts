@@ -3,25 +3,20 @@
  */
 import { useMutation, useQuery, useQueryClient, type UseMutationResult, type UseQueryResult } from '@tanstack/react-query';
 import { request } from '@/api/client';
-import { USE_MOCK } from '@/api/client';
 import { apiUrl } from '@/utils/apiUrl';
-import { scenarioTemplates as mockTemplates, templateCards as mockCards, featureItems as mockFeatures, generationSteps as mockSteps, editorSceneComponents as mockComponents, uploadItems as mockUploadItems } from '@ican/mock-data';
-import type { FeatureItem, GenerationStep, SceneTemplate, TemplateCard, UploadItem } from '@ican/contracts';
+import type { FeatureItem, GenerationStep, SceneTemplate } from '@ican/contracts';
 import type { ProjectCreate, ProjectFileRead, ProjectMemberRead, ProjectMemberUpsert, ProjectRead, ProjectUpdate, ProjectWorkspaceRead, ScenarioRead, TemplateApplyCreate, TemplateDetailRead } from '@/api/dtos/backend';
 
 export async function getTemplates(category?: string): Promise<SceneTemplate[]> {
-  if (USE_MOCK) return mockTemplates;
   const data: SceneTemplate[] = await request({ url: apiUrl('/templates', category ? { category } : {}) });
   return data;
 }
 
 export async function getTemplateById(id: string): Promise<TemplateDetailRead | null> {
-  if (USE_MOCK) return mockCards.find((t) => t.id === id) ?? null;
   return request({ url: apiUrl(`/templates/${id}`) });
 }
 
 export async function applyTemplate(id: string, params: TemplateApplyCreate): Promise<ScenarioRead> {
-  if (USE_MOCK) return { id: `scn-${Date.now()}`, project_id: params.project_id, name: params.name, data: { components: [], canvas: { width: 1200, height: 800, scale: 1 }, schema_version: '1.0' }, version: 1, updated_at: new Date().toISOString() };
   return request({ url: apiUrl(`/templates/${id}/apply`), method: 'POST', data: params });
 }
 
@@ -41,9 +36,9 @@ export async function getProjectWorkspace(id: string): Promise<ProjectWorkspaceR
   return request({ url: apiUrl(`/projects/${id}/workspace`) });
 }
 
-export async function uploadProjectFile(projectId: string, file: File): Promise<ProjectFileRead> {
+export async function uploadProjectFile(projectId: string, file: File, kind = 'attachment'): Promise<ProjectFileRead> {
   const body = await file.arrayBuffer();
-  return request({ url: apiUrl(`/projects/${projectId}/files`), method: 'POST', data: body, headers: { 'X-Filename': file.name, 'Content-Type': file.type || 'application/octet-stream' } });
+  return request({ url: apiUrl(`/projects/${projectId}/files`), method: 'POST', params: { kind }, data: body, headers: { 'X-Filename': file.name, 'Content-Type': file.type || 'application/octet-stream' } });
 }
 
 export function useProjects(): UseQueryResult<ProjectRead[]> {
@@ -71,7 +66,7 @@ export async function upsertProjectMember(projectId: string, payload: ProjectMem
 }
 
 export function useProjectMembers(projectId: string): UseQueryResult<ProjectMemberRead[]> {
-  return useQuery({ queryKey: ['project-members', projectId], queryFn: () => request({ url: apiUrl(`/projects/${projectId}/members`) }), enabled: Boolean(projectId) });
+  return useQuery({ queryKey: ['project-members', projectId], queryFn: () => request<ProjectMemberRead[]>({ url: apiUrl(`/projects/${projectId}/members`) }), enabled: Boolean(projectId) });
 }
 
 export function useUpdateProject(): UseMutationResult<ProjectRead, Error, { id: string; changes: ProjectUpdate }> {
@@ -85,8 +80,12 @@ export function useUpdateProject(): UseMutationResult<ProjectRead, Error, { id: 
   });
 }
 
-export const homeStaticData = {
-  features: mockFeatures as FeatureItem[],
-  steps: mockSteps as GenerationStep[],
-  examples: [] as Array<{ label: string; text: string }>,
+export const homeStaticData: {
+  features: FeatureItem[];
+  steps: GenerationStep[];
+  examples: Array<{ label: string; text: string }>;
+} = {
+  features: [],
+  steps: [],
+  examples: [],
 };

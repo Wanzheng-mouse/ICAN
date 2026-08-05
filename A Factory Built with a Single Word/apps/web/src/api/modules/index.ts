@@ -1,5 +1,5 @@
 /**
- * 领域 API 模块 · 按 VITE_USE_MOCK 切换数据源
+ * 领域 API 模块 · 统一调用真实后端
  *
  * 用法：
  *   import { useTemplates } from '@/api/modules';

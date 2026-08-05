@@ -13,7 +13,7 @@ import { ArmAnimator } from './animation/ArmAnimator';
 import { WarehouseTransform } from './WarehouseTransform';
 import type { SimView3DProps } from './types';
 import type { AgvState } from './types';
-import { AGV_STATE_COLORS, AGV_STATE_GLOW } from './types';
+import { AGV_STATE_COLORS, AGV_STATE_GLOW, AGV_PATH_STRATEGY_COLORS } from './types';
 import type { WallSegment, Door } from './digitalTwin';
 import { WallType, DoorType } from './digitalTwin';
 
@@ -135,7 +135,9 @@ export class SimScene {
       top: '0',
       left: '0',
       pointerEvents: 'none',
-      overflow: 'hidden',
+      // Never clip labels at the renderer edge — the parent canvas already
+      // masks the WebGL surface; letting labels overflow keeps text whole.
+      overflow: 'visible',
     });
     this.container.appendChild(this.labelRenderer.domElement);
 
@@ -227,10 +229,12 @@ export class SimScene {
       // Keep the default twin view quiet: only large navigation anchors stay visible.
       // Operational detail is available through equipment selection and the side panels.
       if (!anchorZoneLabels.has(zone.label)) return;
-      const label = this.createLabel(zone.label, zone.color, 'zone');
-      const position = this.transform.point(zone.x + 12, zone.y + 18, 0.12);
-      label.position.copy(position);
-      this.staticRoot.add(label);
+        const label = this.createLabel(zone.label, zone.color, 'zone');
+        // Centre the label on the zone (lifted off the floor) and anchor it
+        // above its point so it never clips at the canvas edge.
+        const position = this.transform.point(zone.x + zone.w / 2, zone.y + zone.h / 2, 0.5);
+        label.position.copy(position);
+        this.staticRoot.add(label);
     });
 
     (props.shelves ?? []).forEach((shelf) => {
@@ -340,9 +344,14 @@ export class SimScene {
     const pose = this.getAgvPose(agvData);
     if (!pose) return;
 
+    // Per-AGV path strategy gets its own route line colour so the operator
+    // can tell at a glance which strategy is winning the route.
+    const strategyColor = agvData.pathStrategy
+      ? AGV_PATH_STRATEGY_COLORS[agvData.pathStrategy] || AGV_STATE_COLORS[agvData.state as AgvState] || '#06b6d4'
+      : (AGV_STATE_COLORS[agvData.state as AgvState] || '#06b6d4');
     const routeSignature = JSON.stringify({
       path: agvData.route,
-      color: AGV_STATE_COLORS[agvData.state as AgvState] || '#94a3b8',
+      color: strategyColor,
     });
     const oldRoute = this.routeMap.get(agvData.id);
     if (force || !oldRoute || oldRoute.signature !== routeSignature) {
@@ -353,7 +362,7 @@ export class SimScene {
 
       const line = createPathLine(
         agvData.route,
-        AGV_STATE_COLORS[agvData.state as AgvState] || '#94a3b8',
+        strategyColor,
         this.transform,
       );
       if (agvData.state === 'blocked') {
@@ -646,23 +655,33 @@ export class SimScene {
     element.textContent = text;
     const isChip = kind !== 'plain';
     Object.assign(element.style, {
+      display: 'inline-block',
       color: kind === 'zone' ? '#0f172a' : color,
-      fontSize: kind === 'zone' ? '10px' : '9px',
+      fontSize: kind === 'zone' ? '11px' : '10px',
       fontWeight: '700',
-      letterSpacing: '0.04em',
+      lineHeight: '1.25',
+      letterSpacing: '0.02em',
+      // Guarantee the full label is always visible — never wrap or clip text.
       whiteSpace: 'nowrap',
-      textShadow: isChip ? 'none' : '0 1px 8px rgba(255,255,255,0.9)',
+      maxWidth: 'none',
+      overflow: 'visible',
+      textOverflow: 'clip',
+      textShadow: isChip ? 'none' : '0 1px 6px rgba(2,8,20,0.85)',
       transform: 'translate(0, -50%)',
-      background: isChip ? 'rgba(255,255,255,0.82)' : 'transparent',
-      border: isChip ? `1px solid ${color}55` : 'none',
+      background: isChip ? 'rgba(255,255,255,0.92)' : 'transparent',
+      border: isChip ? `1px solid ${color}66` : 'none',
       borderLeft: kind === 'zone' ? `3px solid ${color}` : undefined,
-      borderRadius: '6px',
-      padding: isChip ? '3px 7px' : '0',
-      boxShadow: isChip ? '0 4px 12px rgba(15,23,42,0.08)' : 'none',
+      borderRadius: '7px',
+      padding: isChip ? '4px 9px' : '0',
+      boxShadow: isChip ? '0 6px 16px rgba(2,8,20,0.18)' : 'none',
       pointerEvents: 'none',
-      backdropFilter: isChip ? 'blur(6px)' : undefined,
+      backdropFilter: isChip ? 'blur(8px)' : undefined,
     });
-    return new CSS2DObject(element);
+    const obj = new CSS2DObject(element);
+    // Anchor chips above their point so they never slip under the floor /
+    // canvas edge and get cut off.
+    obj.center.set(0.5, kind === 'zone' ? 1 : 0.5);
+    return obj;
   }
 
   private createBatteryLabel(battery: number): CSS2DObject {

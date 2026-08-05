@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card } from 'antd';
 import { useAppStore } from '@/stores/useAppStore';
-import { mockChangePassword } from '@/api/modules';
+import { changePassword } from '@/api/modules';
 import { SectionCard } from '@/components';
 import './Account.css';
 
@@ -19,7 +19,7 @@ export default function SettingsPage() {
     if (!user) return;
     setLoading(true);
     try {
-      await mockChangePassword(user.id, values.oldPassword, values.newPassword);
+      await changePassword({ old_password: values.oldPassword, new_password: values.newPassword });
       Modal.confirm({
         title: '密码修改成功',
         content: '请使用新密码重新登录',

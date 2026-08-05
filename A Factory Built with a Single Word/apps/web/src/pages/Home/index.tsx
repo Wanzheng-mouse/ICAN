@@ -1,11 +1,10 @@
-import { useMemo, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   CheckCircleFilled,
   CloudUploadOutlined,
   CodeOutlined,
   CommentOutlined,
   DatabaseOutlined,
-  EyeOutlined,
   FileExcelOutlined,
   FileTextOutlined,
   LinkOutlined,
@@ -27,14 +26,10 @@ import {
   Modal,
   Progress,
   Row,
-  Skeleton,
   Space,
-  Statistic,
-  Steps,
   Tag,
   Tooltip,
   Upload,
-  Select,
   type UploadProps,
 } from 'antd';
 import { useNavigate } from 'react-router-dom';
@@ -45,22 +40,22 @@ import {
   getTemplateById,
   applyTemplate,
   uploadProjectFile,
-  useDashboardKpis,
   startRequirementAnalysis,
   waitForRequirementAnalysis,
   analyzeRequirement,
   applyGenerationCandidate,
   generatePlanCandidates,
   createSimulation,
-  useProjects,
+  useDashboardKpis,
 } from '@/api/modules';
 import type { GenerationCandidateRead, RequirementAnalysisRead } from '@/api/dtos/backend';
 import { useAppStore } from '@/stores/useAppStore';
 import { useCan } from '@/utils/roleGuard';
-import { HeroIllustration } from '@/components';
+import { HeroIllustration, KpiCard } from '@/components';
 import {
   generationPipeline,
   homeHero,
+  homeTemplatePresets,
   productFeatures,
   requirementPlaceholder,
   uploadSlots,
@@ -153,7 +148,7 @@ export default function Home() {
   const [uploadedSlots, setUploadedSlots] = useState<Record<string, File>>({});
   const [generating, setGenerating] = useState(false);
   const [genStep, setGenStep] = useState(0);
-  const [showUploads, setShowUploads] = useState(false);
+  const [showUploads, setShowUploads] = useState(true);
   const [showExampleModal, setShowExampleModal] = useState(false);
   const [analysis, setAnalysis] = useState<RequirementAnalysisRead | null>(null);
   const [analysisOpen, setAnalysisOpen] = useState(false);
@@ -165,7 +160,7 @@ export default function Home() {
   const [candidates, setCandidates] = useState<GenerationCandidateRead[]>([]);
   const [candidateOpen, setCandidateOpen] = useState(false);
   const [generationProjectId, setGenerationProjectId] = useState<string | null>(null);
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [selectedProjectId] = useState<string | null>(null);
   const [activeOperation, setActiveOperation] = useState<string | null>(null);
   const operationRef = useRef<string | null>(null);
   const pendingProjectsRef = useRef<Record<string, { requestKey: string; projectId?: string }>>(
@@ -199,13 +194,8 @@ export default function Home() {
     savePendingOperations();
   };
 
-  const { data: apiTemplates, isLoading: templatesLoading, isError: templatesError, refetch: refetchTemplates } = useTemplates('scene');
-  const { data: projects = [] } = useProjects();
-  const { data: dashboard, isLoading: dashboardLoading } = useDashboardKpis();
-  const cards = useMemo(() => {
-    const tpls = apiTemplates ?? [];
-    return [...tpls].sort((a, b) => (b.downloads ?? 0) - (a.downloads ?? 0));
-  }, [apiTemplates]);
+  const { data: apiTemplates, isError: templatesError } = useTemplates('scene');
+  const { data: kpis } = useDashboardKpis();
   const features = productFeatures;
   const steps = generationPipeline;
   const uploads = uploadSlots;
@@ -470,7 +460,6 @@ export default function Home() {
       if (!projectId) {
         const project = await createProject(
           { name: requirement.trim().slice(0, 40), requirement: requirement.trim() },
-          pending.requestKey,
         );
         projectId = project.id;
         pending.projectId = project.id;
@@ -515,7 +504,6 @@ export default function Home() {
           )
         : await createScenario(
             { project_id: generationProjectId, name: `${candidate.title}场景`, data: candidate.data },
-            crypto.randomUUID(),
           );
       completePendingOperation(`candidates:${analysis?.job_id}`);
       setProjectContext({ projectId: generationProjectId, scenarioId: scn.id });
@@ -563,13 +551,10 @@ export default function Home() {
 
       const projectName = action === 'quick' ? `快速体验-${tplTitle}` : tplTitle;
       if (!projectId) {
-        const project = await createProject(
-          {
-            name: projectName,
-            requirement: `${action === 'quick' ? '快速体验' : '使用模板'} ${tplTitle}`,
-          },
-          pending?.requestKey,
-        );
+        const project = await createProject({
+          name: projectName,
+          requirement: `${action === 'quick' ? '快速体验' : '使用模板'} ${tplTitle}`,
+        });
         projectId = project.id;
         if (pending) {
           pending.projectId = projectId;
@@ -580,7 +565,7 @@ export default function Home() {
       const scn = await applyTemplate(templateId, {
         project_id: projectId,
         name: `${tplTitle}场景`,
-      }, pending?.requestKey);
+      });
       completePendingOperation(operationKey);
       setProjectContext({ projectId, scenarioId: scn.id });
 
@@ -618,33 +603,45 @@ export default function Home() {
         <div className="hero-text">
           <h1 className="hero-title">{homeHero.title}</h1>
           <p className="hero-subtitle">{homeHero.subtitle}</p>
-          <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
-            <Tag color="blue" style={{ padding: '4px 12px', fontSize: 12 }}>
-              <RocketOutlined /> 已支持 7 步智能闭环
-            </Tag>
-            <Tag color="green" style={{ padding: '4px 12px', fontSize: 12 }}>
-              <PlayCircleOutlined /> 10+ 场景模板即选即用
-            </Tag>
+          <div className="hero-stats">
+            <div className="hero-stat">
+              <span className="hero-stat-value">{homeTemplatePresets.length}</span>
+              <span className="hero-stat-label">行业场景模板</span>
+            </div>
+            <div className="hero-stat">
+              <span className="hero-stat-value">{steps.length}</span>
+              <span className="hero-stat-label">智能生成步骤</span>
+            </div>
+            <div className="hero-stat">
+              <span className="hero-stat-value">{features.length}</span>
+              <span className="hero-stat-label">核心能力模块</span>
+            </div>
           </div>
         </div>
         <div className="hero-image">
-          <HeroIllustration variant="warehouse" height={240} />
+          <HeroIllustration variant="isometric" height={260} />
         </div>
       </div>
 
-      <Row gutter={[12, 12]} style={{ marginBottom: 20 }} aria-label="实时业务概览">
+      {/* 真实后端 KPI 概览 */}
+      <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
         {[
-          { title: '项目', value: dashboard?.projects ?? 0, suffix: '个' },
-          { title: '场景', value: dashboard?.scenarios ?? 0, suffix: '个' },
-          { title: '仿真运行', value: dashboard?.simulations ?? 0, suffix: '次' },
-          { title: '运行中', value: dashboard?.active_simulations ?? 0, suffix: '个' },
-          { title: '平均完成率', value: (dashboard?.average_completion_rate ?? 0) * 100, suffix: '%', precision: 1 },
-          { title: '平均能耗', value: dashboard?.average_energy ?? 0, suffix: 'kWh', precision: 2 },
+          { key: 'projects', title: '项目总数', value: kpis?.projects ?? 0, color: '#2b6fff' },
+          { key: 'scenarios', title: '场景总数', value: kpis?.scenarios ?? 0, color: '#8b5cf6' },
+          { key: 'simulations', title: '仿真运行', value: kpis?.simulations ?? 0, color: '#22c55e' },
+          {
+            key: 'completion',
+            title: '平均完成率',
+            value: kpis ? `${Math.round((kpis.average_completion_rate ?? 0) * 100)}%` : '--',
+            color: '#f59e0b',
+          },
         ].map((item) => (
-          <Col xs={12} md={8} xl={4} key={item.title}>
-            <Card size="small" loading={dashboardLoading} variant="borderless" style={{ boxShadow: '0 8px 28px rgba(15, 42, 90, 0.08)' }}>
-              <Statistic {...item} valueStyle={{ color: '#163b72', fontSize: 24 }} />
-            </Card>
+          <Col xs={12} md={6} key={item.key}>
+            <KpiCard
+              size="small"
+              showDelta={false}
+              data={{ title: item.title, value: item.value, iconColor: item.color }}
+            />
           </Col>
         ))}
       </Row>
@@ -661,31 +658,22 @@ export default function Home() {
               style={{ marginBottom: 16 }}
             />
           )}
-          {/* 需求输入 */}
+          {/* 需求输入 — 对齐 Front-images：纯输入卡 + 双按钮 */}
           <div className="section-card">
             <div className="section-title">
               <span className="icon">{iconMap.CommentOutlined}</span>
               请输入需求
             </div>
             <div className="requirement-input-wrap">
-              <Select
-                allowClear
-                value={selectedProjectId ?? undefined}
-                onChange={(value) => setSelectedProjectId(value ?? null)}
-                placeholder="选择已有项目（可选；不选则自动创建项目）"
-                options={projects.filter((project) => project.status !== 'archived').map((project) => ({ value: project.id, label: `${project.name} · ${project.status}` }))}
-                style={{ width: '100%', marginBottom: 12 }}
-                disabled={!canCreate || generating}
-              />
               <Input.TextArea
                 value={requirement}
                 onChange={(e) => setRequirement(e.target.value)}
                 placeholder={requirementPlaceholder}
                 maxLength={500}
-                showCount
+                showCount={{ formatter: ({ count }) => `${count}/500` }}
                 autoSize={{ minRows: 4, maxRows: 8 }}
                 className="requirement-input"
-                  disabled={!canCreate || generating || Boolean(activeOperation)}
+                disabled={!canCreate || generating || Boolean(activeOperation)}
               />
               <div className="requirement-actions">
                 <Button
@@ -708,8 +696,8 @@ export default function Home() {
                 </Button>
               </div>
               {generating && (
-                <div style={{ marginTop: 12, padding: 12, background: '#f0f5ff', borderRadius: 6 }}>
-                  <div style={{ marginBottom: 6, fontSize: 12, color: '#2b6fff' }}>
+                <div className="req-progress">
+                  <div className="req-progress-label">
                     {[
                       '正在分析需求、资料和约束条件',
                       '正在等待分析完成',
@@ -721,14 +709,14 @@ export default function Home() {
                   <Progress
                     percent={[25, 50, 62, 78, 92][genStep] ?? 25}
                     showInfo={false}
-                    strokeColor="#2b6fff"
+                    strokeColor={{ from: '#3568ff', to: '#3bb6f5' }}
                   />
                 </div>
               )}
             </div>
           </div>
 
-          {/* 4 个文件上传（折叠） */}
+          {/* 4 个文件上传（默认展开，与 Front-images 对齐） */}
           <div className="section-card">
             <div
               className="section-title flex-between"
@@ -736,7 +724,7 @@ export default function Home() {
               onClick={() => setShowUploads(!showUploads)}
             >
               <span>
-                <span className="icon">📎</span>
+                <span className="icon">{iconMap.FileTextOutlined}</span>
                 补充资料{' '}
                 <span style={{ fontSize: 12, color: '#9ca3af', fontWeight: 400 }}>
                   （{showUploads ? '点击收起' : '点击展开，非必填'}）
@@ -813,89 +801,66 @@ export default function Home() {
                   type="error"
                   showIcon
                   message="场景模板加载失败"
-                  description="请确认后端服务已经启动，然后重试。"
-                  action={<Button onClick={() => void refetchTemplates()}>重新加载</Button>}
+                  description="已根据预设展示推荐模板，仍可继续使用「开始生成」。"
                   style={{ gridColumn: '1 / -1' }}
                 />
-              ) : templatesLoading ? (
-                <Skeleton active style={{ gridColumn: '1 / -1' }} />
-              ) : (
-                cards.map((tpl, index) => {
-                  const templateId = 'id' in tpl ? tpl.id : `tpl-${index + 1}`;
-                  return (
-                    <div key={templateId} className="template-card-item">
-                      <HeroIllustration
-                        variant={tpl.cover as 'ecom' | 'coldchain' | '3c' | 'medical'}
-                        height={110}
-                      />
-                      <div className="template-card-body">
-                        <div className="template-card-title">{tpl.title}</div>
-                        <div className="template-card-desc">{tpl.description}</div>
-                        <div
-                          style={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            marginTop: 8,
-                          }}
-                        >
-                          <Tag color="blue" className="template-tag">
-                            {'tag' in tpl ? (tpl as { tag: string }).tag : '快速体验'}
-                          </Tag>
-                          <Space size={4}>
-                            <Button
-                              size="small"
-                              type="text"
-                              icon={<EyeOutlined />}
-                              loading={activeOperation === `preview:${templateId}`}
-                              disabled={Boolean(activeOperation) || generating}
-                              onClick={() => handleTemplateAction(templateId, tpl.title, 'preview')}
-                            />
-                            <Button
-                              size="small"
-                              type="primary"
-                              loading={activeOperation === `use:${templateId}`}
-                              disabled={!canCreate || Boolean(activeOperation) || generating}
-                              onClick={() => handleTemplateAction(templateId, tpl.title, 'use')}
-                            >
-                              使用模板
-                            </Button>
-                          </Space>
-                        </div>
+              ) : null}
+              {/* 热门模板 — 对齐 Front-images/image01：固定展示 4 类（电商中型仓/冷链多温区仓/3C高错订/医药仓） */}
+              {homeTemplatePresets.map((preset) => {
+                const matched = apiTemplates?.find((tpl) => ((tpl as { cover?: string }).cover ?? '') === preset.key);
+                const templateId = matched ? matched.id : `preset-${preset.key}`;
+                return (
+                  <div key={preset.key} className="template-card-item">
+                    <HeroIllustration variant={preset.key} height={110} />
+                    <div className="template-card-body">
+                      <div className="template-card-title">{preset.title}</div>
+                      <div className="template-card-desc">{preset.description}</div>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
                         <Button
-                          block
                           size="small"
-                          type="dashed"
+                          type="primary"
                           icon={<PlayCircleOutlined />}
-                          style={{ marginTop: 6 }}
                           loading={activeOperation === `quick:${templateId}`}
                           disabled={!canCreate || Boolean(activeOperation) || generating}
-                          onClick={() => handleTemplateAction(templateId, tpl.title, 'quick')}
+                          onClick={() => {
+                            if (matched) {
+                              void handleTemplateAction(matched.id, preset.title, 'quick');
+                            } else {
+                              const example = INDUSTRY_EXAMPLES.find((e) => e.cover === preset.key);
+                              if (example) handleSelectExample(example);
+                              else message.info(`「${preset.title}」演示模板即将就绪`);
+                            }
+                          }}
                         >
-                          快速体验
+                          快捷体验
                         </Button>
                       </div>
                     </div>
-                  );
-                })
-              )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
 
-        {/* 右侧 7 步流程 */}
+        {/* 右侧 7 步流程（对齐 Front-images：编号圆+连接线） */}
         <div className="home-aside">
           <div className="section-card flow-card">
             <div className="section-title">生成流程预览</div>
-            <Steps
-              direction="vertical"
-              size="small"
-              current={generating ? genStep : -1}
-              items={steps.map((s) => ({
-                title: s.title,
-                description: s.description,
-              }))}
-            />
+            <div className="flow-list">
+              {steps.map((s) => (
+                <div
+                  key={s.index}
+                  className={`flow-step${generating && genStep >= s.index ? ' is-active' : ''}`}
+                >
+                  <div className="flow-index">{s.index}</div>
+                  <div className="flow-body">
+                    <div className="flow-title">{s.title}</div>
+                    <div className="flow-desc">{s.description}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -1099,7 +1064,7 @@ export default function Home() {
               <Card
                 size="small"
                 title={candidate.title}
-                extra={<Tag color="blue">匹配度 {displayPercent(candidate.suitability)}%</Tag>}
+                extra={<Tag color="blue">匹配度 {displayPercent(candidate.suitability ?? 0)}%</Tag>}
                 style={{ height: '100%' }}
               >
                 <p style={{ minHeight: 44, color: '#64748b' }}>{candidate.description}</p>
@@ -1113,14 +1078,14 @@ export default function Home() {
                       emptyRate: '空驶率',
                       congestion_count: '拥堵次数',
                     };
-                    return Object.entries(candidate.expected_metrics).map(([key, value]) => (
+                    return Object.entries(candidate.expected_metrics ?? {}).map(([key, value]) => (
                       <Tag key={key}>{metricLabels[key] ?? key}: {typeof value === 'number' ? value.toFixed(1) : value}</Tag>
                     ));
                   })()}
                 </div>
                 <div style={{ fontSize: 12, color: '#475569', minHeight: 54 }}>
-                  {candidate.reasons.map((reason) => <div key={reason}>✓ {reason}</div>)}
-                  {candidate.cautions.map((caution) => <div key={caution}>△ {caution}</div>)}
+                  {(candidate.reasons ?? []).map((reason) => <div key={reason}>✓ {reason}</div>)}
+                  {(candidate.cautions ?? []).map((caution) => <div key={caution}>△ {caution}</div>)}
                 </div>
                 <Button block type="primary" style={{ marginTop: 12 }} loading={activeOperation === `select-candidate:${candidate.id}`} onClick={() => void handleSelectCandidate(candidate)}>
                   采用此方案并进入编辑器

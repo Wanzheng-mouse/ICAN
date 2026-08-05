@@ -44,12 +44,11 @@ describe('页面与真实 API 的连通性守卫', () => {
     expect(content).toContain('${apiPrefix}/simulations/${simulationId}/stream');
   });
 
-  it('开发环境默认开启总 Mock 和所有领域 Mock', () => {
+  it('开发环境不再配置任何 Mock 标志', () => {
     const env = source('../../.env.development');
     const mockFlags = env
       .split(/\r?\n/)
       .filter((line) => line.startsWith('VITE_USE_MOCK=') || line.startsWith('VITE_MOCK_'));
-    expect(mockFlags.length).toBeGreaterThan(1);
-    expect(mockFlags.every((line) => line.endsWith('=true'))).toBe(true);
+    expect(mockFlags.length).toBe(0);
   });
 });

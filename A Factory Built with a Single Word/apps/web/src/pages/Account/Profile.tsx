@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Button, Card, Descriptions, Input, Tag, Upload, message } from 'antd';
 import { CameraOutlined, CheckCircleFilled, ClockCircleOutlined, SafetyCertificateOutlined, UserOutlined } from '@ant-design/icons';
 import { useAppStore } from '@/stores/useAppStore';
-import { mockUpdateProfile } from '@/api/modules';
+import { updateMyProfile as updateProfile } from '@/api/modules';
 import { SectionCard } from '@/components';
 import './Account.css';
 
@@ -16,7 +16,7 @@ export default function ProfilePage() {
   const handleSave = async () => {
     if (!user) return;
     try {
-      const updated = await mockUpdateProfile(user.id, { name, avatar: avatarPreview });
+      const updated = await updateProfile({ name, avatar: avatarPreview });
       setUser(updated);
       setEditing(false);
       message.success('个人资料已更新');

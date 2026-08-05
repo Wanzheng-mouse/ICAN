@@ -2,8 +2,8 @@ import { useMemo, useState } from 'react';
 import { Badge, Button, List, Segmented, Tag, Space, message } from 'antd';
 import { CheckOutlined, CheckCircleFilled, FileTextFilled, InfoCircleFilled, WarningFilled, RightOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { useNotificationStore } from '@/stores/useNotificationStore';
 import type { NotificationItem } from '@/stores/useNotificationStore';
+import { useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from '@/api/modules';
 import './Notifications.css';
 
 const iconMap: Record<string, React.ReactNode> = {
@@ -57,9 +57,11 @@ function NotificationRow({ item, onRead, onJump }: { item: NotificationItem; onR
 export default function NotificationsPage() {
   const navigate = useNavigate();
   const [filter, setFilter] = useState<string>('all');
-  const items = useNotificationStore((s) => s.items);
-  const markAllRead = useNotificationStore((s) => s.markAllRead);
-  const markRead = useNotificationStore((s) => s.markRead);
+  const { data: items = [], isLoading } = useNotifications();
+  const markReadMutation = useMarkNotificationRead();
+  const markAllReadMutation = useMarkAllNotificationsRead();
+  const markRead = (id: string) => markReadMutation.mutate(id);
+  const markAllRead = () => markAllReadMutation.mutate();
 
   const unreadCount = items.filter((n) => !n.read).length;
 
@@ -97,7 +99,7 @@ export default function NotificationsPage() {
         <span className="notif-total">共 {filtered.length} 条</span>
       </div>
 
-      <div className="notif-card">
+      <div className="notif-card" aria-busy={isLoading}>
         {filtered.length === 0 ? (
           <div className="notif-empty">
             <div className="notif-empty-icon">🔔</div>

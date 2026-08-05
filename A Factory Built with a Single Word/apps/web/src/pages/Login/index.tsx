@@ -8,7 +8,7 @@ import {
 } from '@ant-design/icons';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/stores/useAppStore';
-import { DEMO_ACCOUNT_HINT, mockLogin } from '@/api/modules';
+import { DEMO_ACCOUNT_HINT, login as loginUser } from '@/api/modules';
 import './Login.css';
 
 const { Text, Title } = Typography;
@@ -25,7 +25,7 @@ export default function LoginPage() {
   const handleFinish = async (values: { username: string; password: string; remember: boolean }) => {
     setLoading(true);
     try {
-      const result = await mockLogin(values);
+      const result = await loginUser(values);
       const defaultPage = preferencesByUserId[result.user.id]?.defaultPage
         ?? result.user.preferences?.defaultPage
         ?? '/';

@@ -5,18 +5,15 @@ import {
   Button,
   Card,
   Descriptions,
-  Empty,
   Form,
   Input,
   List,
   Modal,
   Popconfirm,
-  Skeleton,
   Select,
+  Skeleton,
   Space,
-  Statistic,
   Tag,
-  Typography,
   Upload,
   type UploadProps,
 } from 'antd';
@@ -30,6 +27,8 @@ import {
   InboxOutlined,
   TeamOutlined,
   UserAddOutlined,
+  FolderOutlined,
+  ClockCircleOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -48,12 +47,16 @@ import { useAppStore } from '@/stores/useAppStore';
 import { getApiErrorMessage } from '@/api/errorMessage';
 import './index.css';
 
-const { Title, Text, Paragraph } = Typography;
-
 function formatBytes(size: number) {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function statusMeta(status: string): { accent: string; iconCls: string; tagCls: string; label: string } {
+  if (status === 'active') return { accent: 'card-accent-active', iconCls: 'card-icon-active', tagCls: 'card-tag-active', label: '进行中' };
+  if (status === 'draft') return { accent: 'card-accent-draft', iconCls: 'card-icon-draft', tagCls: 'card-tag-draft', label: '草稿' };
+  return { accent: 'card-accent-archived', iconCls: 'card-icon-archived', tagCls: 'card-tag-archived', label: '已归档' };
 }
 
 export default function ProjectsPage() {
@@ -88,7 +91,6 @@ export default function ProjectsPage() {
     }
   };
 
-  // URL(/projects/:projectId) 深链接 → 打开对应项目工作区，支持刷新恢复与直接分享。
   useEffect(() => {
     setSelectedId(routeProjectId ?? '');
   }, [routeProjectId]);
@@ -184,53 +186,117 @@ export default function ProjectsPage() {
 
   return (
     <div className="projects-page">
+      {/* 顶栏 */}
       <div className="projects-header">
-        <div>
+        <div className="projects-header-left">
           <h1>项目中心</h1>
-          <p>集中管理需求、场景和输入资料</p>
+          <p>管理你的所有无人仓项目、场景、仿真与方案进化</p>
         </div>
-        <Space size="middle">
-          <div className="projects-stats">
-            <div className="stat-item"><div className="num">{activeProjects.length}</div><div className="label">进行中</div></div>
-            <div className="stat-item"><div className="num">{archivedCount}</div><div className="label">已归档</div></div>
-            <div className="stat-item"><div className="num">{projects.length}</div><div className="label">全部项目</div></div>
-          </div>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/')} disabled={!canWrite}>创建项目</Button>
-        </Space>
       </div>
 
-      {isError && <Alert type="error" showIcon message="项目加载失败" action={<Button onClick={() => void refetch()}>重试</Button>} style={{ marginBottom: 16 }} />}
-      {isLoading ? <Skeleton active paragraph={{ rows: 6 }} /> : projects.length === 0 ? (
-        <Card><Empty description="还没有项目"><Button type="primary" onClick={() => navigate('/')} disabled={!canWrite}>创建第一个项目</Button></Empty></Card>
+      {/* 统计行 */}
+      <div className="projects-stats">
+        <div className="stat-card stat-active">
+          <div className="stat-accent" />
+          <div className="stat-value">{activeProjects.length}</div>
+          <div className="stat-label">进行中</div>
+          <FolderOpenOutlined className="stat-icon" />
+        </div>
+        <div className="stat-card stat-archived">
+          <div className="stat-accent" />
+          <div className="stat-value">{archivedCount}</div>
+          <div className="stat-label">已归档</div>
+          <InboxOutlined className="stat-icon" />
+        </div>
+        <div className="stat-card stat-total">
+          <div className="stat-accent" />
+          <div className="stat-value">{projects.length}</div>
+          <div className="stat-label">全部项目</div>
+          <FolderOutlined className="stat-icon" />
+        </div>
+        <div
+          className="create-project-area"
+          onClick={() => navigate('/')}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => { if (e.key === 'Enter') navigate('/'); }}
+        >
+          <div className="create-inner">
+            <div className="create-icon"><PlusOutlined /></div>
+            <div className="create-text">新建项目</div>
+          </div>
+        </div>
+      </div>
+
+      {/* 错误/加载/空状态 */}
+      {isError && <Alert className="projects-error" type="error" showIcon message="项目加载失败" action={<Button onClick={() => void refetch()}>重试</Button>} />}
+
+      {isLoading ? (
+        <div className="projects-skeleton-grid">
+          {Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} active paragraph={{ rows: 3 }} style={{ padding: 20, border: '1px solid #e2e8f0', borderRadius: 16 }} />)}
+        </div>
+      ) : projects.length === 0 ? (
+        <div className="projects-empty">
+          <div className="empty-icon"><FolderOpenOutlined /></div>
+          <div className="empty-title">还没有项目</div>
+          <div className="empty-desc">创建你的第一个无人仓项目，从需求分析开始，快速生成场景与仿真方案。</div>
+          <Button type="primary" size="large" icon={<PlusOutlined />} onClick={() => navigate('/')} disabled={!canWrite}>创建第一个项目</Button>
+        </div>
       ) : (
         <div className="project-grid">
-          {activeProjects.concat(projects.filter((p) => p.status === 'archived')).map((project) => (
-            <div key={project.id} className="project-card">
-              <div className="project-card-body">
-                <div className="project-card-header">
-                  <FolderOpenOutlined className="icon" />
-                  <span className="name">{project.name}</span>
-                  <Tag color={project.status === 'active' ? 'green' : project.status === 'draft' ? 'blue' : 'default'}>{project.status === 'draft' ? '草稿' : project.status === 'active' ? '进行中' : '已归档'}</Tag>
+          {[...activeProjects, ...projects.filter((p) => p.status === 'archived')].map((project) => {
+            const meta = statusMeta(project.status);
+            return (
+              <div key={project.id} className="project-card">
+                {/* 色带 */}
+                <div className={`card-accent ${meta.accent}`} />
+
+                <div className="project-card-body">
+                  {/* 头部 */}
+                  <div className="project-card-header">
+                    <div className={`card-icon ${meta.iconCls}`}>
+                      <FolderOpenOutlined />
+                    </div>
+                    <div className="card-title-area">
+                      <div className="card-name" title={project.name}>{project.name}</div>
+                      <span className={`card-tag ${meta.tagCls}`}>{meta.label}</span>
+                    </div>
+                  </div>
+
+                  {/* 描述 */}
+                  <div className="card-desc">{project.requirement || '暂无需求描述'}</div>
+
+                  {/* 底部元信息 */}
+                  <div className="card-meta">
+                    <span className="card-time"><ClockCircleOutlined style={{ fontSize: 11 }} /> {new Date(project.created_at).toLocaleDateString()}</span>
+                  </div>
                 </div>
-                <div className="desc">{project.requirement || '暂无需求描述'}</div>
-                <div className="meta">创建于 {new Date(project.created_at).toLocaleString()}</div>
+
+                {/* 操作栏 */}
+                <div className="project-card-actions">
+                  <button className="action-btn manage-btn" onClick={() => openWorkspace(project.id)}>
+                    <FolderOpenOutlined /> 管理
+                  </button>
+                  {project.status !== 'archived' ? (
+                    <Popconfirm key="archive" title="确认归档此项目？" onConfirm={() => void archiveProject(project.id)} disabled={!canWrite}>
+                      <button className="action-btn archive-btn" style={{ color: canWrite ? undefined : '#ccc' }}>
+                        <InboxOutlined /> 归档
+                      </button>
+                    </Popconfirm>
+                  ) : (
+                    <button className="action-btn" style={{ color: '#ccc', cursor: 'default' }}>
+                      <InboxOutlined /> 已归档
+                    </button>
+                  )}
+                </div>
               </div>
-              <div className="project-card-actions">
-                <span className="action-btn" onClick={() => openWorkspace(project.id)}><EditOutlined /> 管理</span>
-                {project.status !== 'archived' ? (
-                  <Popconfirm key="archive" title="确认归档该项目？" onConfirm={() => void archiveProject(project.id)} disabled={!canWrite}>
-                    <span className="action-btn" style={{ opacity: canWrite ? 1 : 0.45 }}><InboxOutlined /> 归档</span>
-                  </Popconfirm>
-                ) : (
-                  <span className="action-btn" style={{ opacity: 0.45 }}><InboxOutlined /> 已归档</span>
-                )}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
-      <Modal title="项目工作区" width={720} open={Boolean(selectedId)} onCancel={closeWorkspace} destroyOnClose footer={null}>
+      {/* ── 工作区 Modal ── */}
+      <Modal title="项目工作区" width={720} open={Boolean(selectedId)} onCancel={closeWorkspace} destroyOnHidden footer={null}>
         {workspace.isLoading ? <Skeleton active /> : workspace.isError || !workspace.data ? (
           <Alert type="error" showIcon message="工作区加载失败" action={<Button onClick={() => void workspace.refetch()}>重试</Button>} />
         ) : (
@@ -268,8 +334,8 @@ export default function ProjectsPage() {
               </Button>
             )}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <Card size="small"><Statistic title="场景数量" value={workspace.data.scenarios.length} /></Card>
-              <Card size="small"><Statistic title="资料文件" value={workspace.data.files.length} /></Card>
+              <Card size="small"><span style={{ fontSize: 13, color: '#64748b' }}>场景数量</span><div style={{ fontSize: 24, fontWeight: 700, marginTop: 4 }}>{workspace.data.scenarios.length}</div></Card>
+              <Card size="small"><span style={{ fontSize: 13, color: '#64748b' }}>资料文件</span><div style={{ fontSize: 24, fontWeight: 700, marginTop: 4 }}>{workspace.data.files.length}</div></Card>
             </div>
 
             <Card title="场景" size="small">
@@ -343,13 +409,14 @@ export default function ProjectsPage() {
         )}
       </Modal>
 
+      {/* 编辑资料 Modal */}
       <Modal
         title="编辑项目资料"
         open={editOpen}
         onCancel={() => setEditOpen(false)}
         onOk={() => void saveProjectDetails()}
         confirmLoading={updateMutation.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={editForm} layout="vertical" preserve={false}>
           <Form.Item name="name" label="项目名称" rules={[{ required: true, whitespace: true, message: '请输入项目名称' }, { max: 120 }]}>

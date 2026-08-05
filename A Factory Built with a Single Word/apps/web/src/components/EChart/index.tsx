@@ -60,4 +60,3 @@ export function EChart({ option, height = 320, width = '100%', className, onClic
     />
   );
 }
-

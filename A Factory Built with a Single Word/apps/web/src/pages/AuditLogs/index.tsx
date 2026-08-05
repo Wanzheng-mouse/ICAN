@@ -5,6 +5,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { useAuditLogs, type AuditLogRead } from '@/api/modules';
 import { useRole } from '@/utils/roleGuard';
 import { getApiErrorMessage } from '@/api/errorMessage';
+import './index.css';
 
 const actionLabels: Record<string, string> = {
   create: '创建进化',
@@ -36,15 +37,19 @@ export default function AuditLogsPage() {
   }, [keyword, query.data, resourceType]);
 
   if (role !== 'admin') {
-    return <Result status="403" title="无权访问审计日志" subTitle="该页面仅对平台管理员开放。" />;
+    return (
+      <div className="audit-page">
+        <Result className="audit-denied" status="403" title="无权访问审计日志" subTitle="该页面仅对平台管理员开放。" />
+      </div>
+    );
   }
 
   const columns: ColumnsType<AuditLogRead> = [
     { title: '时间', dataIndex: 'created_at', width: 185, render: (value: string) => new Date(value).toLocaleString('zh-CN') },
-    { title: '操作', dataIndex: 'action', width: 150, render: (value: string) => <Tag color="blue">{actionLabels[value] ?? value}</Tag> },
-    { title: '资源', key: 'resource', width: 210, render: (_, row) => <div><b>{row.resource_type}</b><div style={{ color: '#64748b', fontSize: 12 }}>{row.resource_id}</div></div> },
+    { title: '操作', dataIndex: 'action', width: 150, render: (value: string) => <Tag color="blue" className="audit-action-tag">{actionLabels[value] ?? value}</Tag> },
+    { title: '资源', key: 'resource', width: 210, render: (_, row) => <div><span className="audit-res-type">{row.resource_type}</span><div className="audit-res-id">{row.resource_id}</div></div> },
     { title: '用户 ID', dataIndex: 'user_id', width: 150, ellipsis: true },
-    { title: '详情', dataIndex: 'detail', render: (value: Record<string, unknown>) => Object.keys(value).length ? <Typography.Text code>{JSON.stringify(value)}</Typography.Text> : <span style={{ color: '#94a3b8' }}>无附加数据</span> },
+    { title: '详情', dataIndex: 'detail', render: (value: Record<string, unknown>) => Object.keys(value).length ? <Typography.Text code>{JSON.stringify(value)}</Typography.Text> : <span className="audit-muted">无附加数据</span> },
   ];
 
   const uniqueUsers = new Set((query.data ?? []).map((item) => item.user_id)).size;
@@ -52,22 +57,25 @@ export default function AuditLogsPage() {
   const todayCount = (query.data ?? []).filter((item) => new Date(item.created_at).toDateString() === today).length;
 
   return (
-    <div className="page-container-wide" style={{ maxWidth: 1440, margin: '0 auto' }}>
-      <Card variant="borderless" style={{ marginBottom: 16 }}>
+    <div className="audit-page">
+      <Card variant="borderless" className="audit-hero">
         <Space style={{ width: '100%', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <div><Typography.Title level={2} style={{ margin: 0 }}><AuditOutlined /> 审计日志</Typography.Title><Typography.Paragraph type="secondary" style={{ margin: '8px 0 0' }}>集中追踪仿真控制、异常注入、方案进化、报告导出和成员权限变更。</Typography.Paragraph></div>
+          <div>
+            <Typography.Title level={2} className="audit-hero-title"><AuditOutlined /> 审计日志</Typography.Title>
+            <Typography.Paragraph className="audit-hero-desc">集中追踪仿真控制、异常注入、方案进化、报告导出和成员权限变更。</Typography.Paragraph>
+          </div>
           <Button icon={<ReloadOutlined />} loading={query.isFetching} onClick={() => void query.refetch()}>刷新</Button>
         </Space>
       </Card>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 14, marginBottom: 16 }}>
-        <Card><Statistic title="记录总数" value={query.data?.length ?? 0} prefix={<SafetyCertificateOutlined />} /></Card>
-        <Card><Statistic title="今日操作" value={todayCount} /></Card>
-        <Card><Statistic title="涉及用户" value={uniqueUsers} /></Card>
+      <div className="audit-kpi-row">
+        <Card className="audit-kpi kpi-primary"><Statistic title="记录总数" value={query.data?.length ?? 0} prefix={<SafetyCertificateOutlined />} /></Card>
+        <Card className="audit-kpi kpi-success"><Statistic title="今日操作" value={todayCount} /></Card>
+        <Card className="audit-kpi kpi-purple"><Statistic title="涉及用户" value={uniqueUsers} /></Card>
       </div>
 
-      <Card variant="borderless">
-        <Space wrap style={{ marginBottom: 16 }}>
+      <Card variant="borderless" className="audit-table-card">
+        <div className="audit-toolbar">
           <Input.Search allowClear value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索操作、资源 ID、用户或详情" style={{ width: 360 }} />
           <Select value={resourceType} onChange={setResourceType} style={{ width: 170 }} options={[
             { value: 'all', label: '全部资源' },
@@ -77,7 +85,7 @@ export default function AuditLogsPage() {
             { value: 'project', label: '项目成员' },
             { value: 'profile', label: '账号资料' },
           ]} />
-        </Space>
+        </div>
         {query.isError ? <Alert type="error" showIcon message="审计日志加载失败" description={getApiErrorMessage(query.error, '请检查管理员权限和后端连接')} action={<Button onClick={() => void query.refetch()}>重试</Button>} /> : (
           <Table rowKey="id" loading={query.isLoading} columns={columns} dataSource={rows} pagination={{ pageSize: 15, showSizeChanger: true }} locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无符合条件的审计记录" /> }} scroll={{ x: 980 }} />
         )}
@@ -85,4 +93,3 @@ export default function AuditLogsPage() {
     </div>
   );
 }
-

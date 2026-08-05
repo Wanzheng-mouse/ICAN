@@ -9,12 +9,13 @@ export interface UserInfo {
   avatar: string;
   role: 'admin' | 'operator' | 'viewer';
   preferences?: {
-    theme: 'light' | 'dark';
+    theme: 'light' | 'dark' | 'system';
     defaultPage: string;
     demoMode: boolean;
     notifyAlert: boolean;
     notifyTask: boolean;
     notifySystem: boolean;
+    notifyReport?: boolean;
   };
 }
 
@@ -27,7 +28,7 @@ interface AppState {
   currentScenarioId: string | null;
   currentSimulationId: string | null;
   currentEvolutionId: string | null;
-  simulationConnectionState: 'idle' | 'connected' | 'reconnecting' | 'error';
+  simulationConnectionState: 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'error';
 
   login: (user: UserInfo, token: string, remember?: boolean) => void;
   logout: () => void;
@@ -35,7 +36,7 @@ interface AppState {
 
   setProjectContext: (ctx: { projectId?: string; scenarioId?: string; simulationId?: string; evolutionId?: string }) => void;
   clearProjectContext: () => void;
-  setSimulationConnectionState: (state: 'idle' | 'connected' | 'reconnecting' | 'error') => void;
+  setSimulationConnectionState: (state: 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'error') => void;
   updatePreferences: (p: Partial<NonNullable<UserInfo['preferences']>>) => void;
 }
 

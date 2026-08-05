@@ -15,7 +15,10 @@ export default function App() {
   const antdTheme = useMemo(() => createTheme(themeMode), [themeMode]);
 
   useEffect(() => {
-    document.documentElement.dataset.theme = themeMode;
+    const resolved = themeMode === 'system'
+      ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+      : themeMode;
+    document.documentElement.dataset.theme = resolved;
   }, [themeMode]);
 
   return (

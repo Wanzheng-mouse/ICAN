@@ -1,8 +1,9 @@
 /**
  * Simulation page — backend-snapshot-driven rendering.
- * 
+ *
  * Production mode: all runtime data comes from WebSocket stream (useSimulationStream).
- * Mock/demo mode: local SimulationEngine provides animation fallback.
+ * Production data flow: scenario snapshot drives 3D layout; WebSocket delivers
+ * live ticks.  No local engine — the backend owns all simulation state.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -28,22 +29,21 @@ import {
   reassignSimulationTask,
   useControlSimulation,
   useInjectAnomaly,
+  useProjects,
   useProjectSimulations,
+  useScenario,
   useSimulationAgents,
   useSimulationDetail,
-  useSimulationEvents,
 } from '@/api/modules';
 import { getApiErrorMessage } from '@/api/errorMessage';
-import { isMockEnabled } from '@/api/mockConfig';
 import { useSimulationStream } from '@/hooks/useSimulationStream';
 import { useAppStore } from '@/stores/useAppStore';
 import type { SimulationEvent } from '@ican/contracts';
 import type { AnomalyCreate } from '@/api/dtos/backend';
 import { simulationKpiDescriptors } from '@/config/simulationConsole';
-// Production path: no local engine dependency. Only used in mock/demo mode below.
-import { SimulationEngine } from '@/components/SimView3D/simulationEngine';
+// Production path: no local engine dependency.
 import type { AgvData, SimulationSnapshot, Task } from '@/components/SimView3D/types';
-import { AGV_STATE_COLORS } from '@/components/SimView3D/types';
+import { AGV_STATE_COLORS, AGV_PATH_STRATEGY_COLORS, AGV_PATH_STRATEGY_LABELS } from '@/components/SimView3D/types';
 import type { WarehouseConfig } from '@/components/SimView3D/digitalTwin';
 import { scenarioToWarehouseConfig } from '@/components/SimView3D/scenarioMapper';
 import type { ScenarioSnapshotData } from '@/components/SimView3D/scenarioMapper';
@@ -67,7 +67,17 @@ const ANOMALY_TYPES = [
   { key: 'station_down', label: '工位停机', color: '#3b82f6' },
 ];
 
-const SIMULATION_USES_MOCK = isMockEnabled('simulation');
+// AGV 状态中文展示
+const AGV_STATE_BADGES: Record<string, { label: string; cls: string }> = {
+  idle:        { label: '待机',    cls: 'badge-gray' },
+  to_pickup:   { label: '取货中',  cls: 'badge-blue' },
+  loading:     { label: '装载中',  cls: 'badge-amber' },
+  to_dropoff:  { label: '送货中',  cls: 'badge-cyan' },
+  unloading:   { label: '卸货中',  cls: 'badge-amber' },
+  returning:   { label: '返航中',  cls: 'badge-indigo' },
+  charging:    { label: '充电中',  cls: 'badge-green' },
+  fault:       { label: '故障',    cls: 'badge-red' },
+};
 
 // Convert warehouse zones to SimView3D zone format
 function warehouseZonesTo3D(wc: WarehouseConfig): SimView3DProps['zones'] {
@@ -106,9 +116,6 @@ function warehouseShelfZonesTo3D(wc: WarehouseConfig): SimView3DProps['shelves']
   return shelves;
 }
 
-// Snapshot interval (~10 FPS to avoid React thrashing)
-const SNAPSHOT_INTERVAL_MS = 100;
-
 export default function Simulation() {
   const pageRef = useRef<HTMLDivElement | null>(null);
   const { message } = App.useApp();
@@ -138,8 +145,7 @@ export default function Simulation() {
   const [evolving, setEvolving] = useState(false);
 
   // In production, the backend tick IS the source of truth. No local engine.
-  // The local engineRef is only used for mock/demo mode animation fallback.
-  const engineRef = useRef<SimulationEngine | null>(null);
+  // The backend owns all simulation state — no local engine is needed.
   const [snapshot, setSnapshot] = useState<SimulationSnapshot | null>(null);
 
   const controlMutation = useControlSimulation();
@@ -173,40 +179,45 @@ export default function Simulation() {
   const sceneComponents = scenarioSnapshot?.components ?? [];
   const usesSavedSceneLayout = !sceneFallback && sceneComponents.length > 0;
 
-  const eventsQuery = useSimulationEvents(simulationId);
   const agentsQuery = useSimulationAgents(simulationId);
   const refreshRuntime = useCallback(() => {
-    void Promise.all([detailQuery.refetch(), eventsQuery.refetch(), agentsQuery.refetch()]);
-  }, [agentsQuery, detailQuery, eventsQuery]);
+    void Promise.all([detailQuery.refetch(), agentsQuery.refetch()]);
+  }, [agentsQuery, detailQuery]);
   const stream = useSimulationStream(simulationId, Boolean(detailQuery.data), refreshRuntime);
   const backendTick = stream.tick;
   const backendConnected = stream.connectionState === 'connected';
 
+  // 获取项目/场景真实名称用于 hero 头部展示
+  const projectsQuery = useProjects();
+  const scenarioQuery = useScenario(scenarioId ?? '');
+  const currentProject = projectsQuery.data?.find((p) => p.id === projectId);
+  const currentScenario = scenarioQuery.data;
+
+  // Mirror the live connection state into the global zustand store so the
+  // sidebar / mini overview can render it.  The previous implementation
+  // returned a cleanup that hard-reset the state to 'idle' on every dep
+  // change, which fired between `'connecting' → 'connected'` and left the
+  // sidebar stuck on "建立连接中" forever.  Now we only sync forward, and
+  // the page-level unmount path clears the store when leaving the route.
+  const lastSyncedRef = useRef<typeof stream.connectionState>('idle');
   useEffect(() => {
+    if (lastSyncedRef.current === stream.connectionState) return;
+    lastSyncedRef.current = stream.connectionState;
     setSimulationConnectionState(stream.connectionState);
-    return () => setSimulationConnectionState('idle');
   }, [setSimulationConnectionState, stream.connectionState]);
+  useEffect(() => {
+    return () => {
+      lastSyncedRef.current = 'idle';
+      setSimulationConnectionState('idle');
+    };
+  }, [setSimulationConnectionState]);
 
   // Initialize local engine ONLY for mock/demo mode. In production, the
-  // backend tick drives everything and no local engine is needed.
-  useEffect(() => {
-    if (SIMULATION_USES_MOCK) {
-      const engine = new SimulationEngine(undefined, warehouseConfig);
-      engineRef.current = engine;
-      const initSnap = engine.tick(0);
-      setSnapshot(initSnap);
-      setSimTime(initSnap.currentTime);
-      return () => {
-        engineRef.current = null;
-      };
-    }
-  }, [warehouseConfig]);
-
   // A real stream tick unlocks rendering immediately. Mutable runtime is no
   // longer embedded in SimulationRead.config, so WebSocket is the sole
   // production source of robot poses and live KPIs.
   useEffect(() => {
-    if (SIMULATION_USES_MOCK || !backendTick) return;
+    if (!backendTick) return;
     setSimTime(backendTick.time);
     setSnapshot((previous) => ({
       currentTime: backendTick.time,
@@ -220,7 +231,7 @@ export default function Simulation() {
       congestion: previous?.congestion ?? [],
       metrics: {
         completedTasks: backendTick.tasks.completed,
-        averageWaitSeconds: backendTick.metrics.average_wait_seconds ?? backendTick.metrics.average_duration,
+        averageWaitSeconds: backendTick.metrics.average_queue_wait_seconds ?? backendTick.metrics.average_wait_seconds ?? 0,
         utilization: backendTick.robots.length
           ? backendTick.robots.filter((robot) => !['idle', 'charging', 'fault'].includes(robot.state)).length / backendTick.robots.length * 100
           : 0,
@@ -260,12 +271,9 @@ export default function Simulation() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [isFullscreen]);
 
-  // Initial system event
-  useEffect(() => {
-    const now = new Date();
-    const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
-    setEvents([{ id: 'e-init', level: 'info', time, message: '仿真系统初始化完成' }]);
-  }, []);
+  // Events are populated only from real backend data (REST history +
+  // WebSocket stream).  No placeholder / synthetic event is shown here so the
+  // "实时事件" panel always reflects genuine runtime activity.
 
   const addEvent = useCallback(
     (level: 'info' | 'warn' | 'success' | 'error', messageText: string) => {
@@ -295,22 +303,12 @@ export default function Simulation() {
   }, [detailQuery.data, setProjectContext]);
 
   useEffect(() => {
-    if (!eventsQuery.data?.length) return;
-    setEvents((current) => {
-      const merged = [...eventsQuery.data, ...current];
-      return merged.filter((event, index) =>
-        merged.findIndex((candidate) => candidate.id === event.id) === index,
-      ).slice(0, 50);
-    });
-  }, [eventsQuery.data]);
-
-  useEffect(() => {
     if (!backendTick?.events.length) return;
     setEvents((current) => {
       const received = backendTick.events.map((event, index) => ({
         id: `stream-${event.type}-${event.description}-${index}`,
         level: event.severity === 'error' ? 'error' as const : 'warn' as const,
-        time: new Date(backendTick.generated_at).toLocaleTimeString('zh-CN', { hour12: false }),
+        time: new Date(backendTick.generated_at ?? Date.now()).toLocaleTimeString('zh-CN', { hour12: false }),
         message: event.description || event.type,
         source: event.type,
       }));
@@ -495,36 +493,10 @@ export default function Simulation() {
   }, [message, refreshRuntime, simulationId]);
 
   // Simulation loop: in production, backend WebSocket drives updates.
-  // Only use local engine tick loop for mock/demo mode.
+  // Production: backend tick is authoritative, just update simTime.
   useEffect(() => {
     if (status !== 'running' || !backendConnected) return;
-    if (!SIMULATION_USES_MOCK) {
-      // Production: backend tick is authoritative, just update simTime
-      if (backendTick) setSimTime(backendTick.time);
-      return;
-    }
-    const engine = engineRef.current;
-    if (!engine) return;
-
-    let lastT = performance.now();
-    let lastSnapshotTime = 0;
-    let id: number;
-    const tick = (now: number) => {
-      const dt = safeDeltaSeconds(now - lastT, speed);
-      lastT = now;
-
-      const snap = engine.tick(dt);
-
-      if (now - lastSnapshotTime >= SNAPSHOT_INTERVAL_MS) {
-        lastSnapshotTime = now;
-        setSimTime(backendTick?.time ?? snap.currentTime);
-        setSnapshot(snap);
-      }
-
-      id = requestAnimationFrame(tick);
-    };
-    id = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(id);
+    if (backendTick) setSimTime(backendTick.time);
   }, [backendConnected, backendTick?.time, speed, status]);
 
   const displayAgvs = useMemo<AgvData[]>(() => {
@@ -532,9 +504,9 @@ export default function Simulation() {
     const savedAgvs = usesSavedSceneLayout
       ? sceneComponents.filter((component) => component.type === 'agv')
       : [];
-    
+
     // Production mode: use backendTick robots as primary data source
-    if (!SIMULATION_USES_MOCK && backendTick?.robots.length) {
+    if (backendTick?.robots.length) {
       return backendTick.robots.map((robot, index) => {
         const saved = savedAgvs[index];
         const hasPosition = typeof robot.x === 'number' && typeof robot.y === 'number';
@@ -571,7 +543,7 @@ export default function Simulation() {
         };
       });
     }
-    
+
     // Fallback: use local snapshot (mock mode or no backend data)
     return snapshot.agvs.map((agv, index) => {
       const backendRobot = backendTick?.robots[index];
@@ -643,25 +615,31 @@ export default function Simulation() {
     }
 
     // Convert AGVs
-    const agvs: Agv3D[] = displayAgvs.map((a) => ({
-      id: a.id,
-      name: a.name,
-      position: a.position,
-      route: a.route,
-      progress: 0,
-      color: AGV_STATE_COLORS[a.state as keyof typeof AGV_STATE_COLORS] || '#06b6d4',
-      state: a.state,
-      battery: Math.round(a.battery * 10) / 10,
-      loadStatus: a.loadStatus,
-      taskId: a.taskId,
-      pickupStationId: a.pickupStationId,
-      targetStationId: a.targetStationId,
-      targetChargerId: a.targetChargerId,
-      remainingSeconds: a.remainingSeconds,
-      completedTasks: a.completedTasks,
-      totalDistance: a.totalDistance,
-      type: a.type ?? 'tote_amr',
-    }));
+    const agvs: Agv3D[] = displayAgvs.map((a) => {
+      const tickRobot = backendTick?.robots?.find((r) => r.id === a.id);
+      const strategy = (tickRobot?.path_strategy as Agv3D['pathStrategy']) ?? 'balanced';
+      return {
+        id: a.id,
+        name: a.name,
+        position: a.position,
+        route: a.route,
+        progress: 0,
+        color: AGV_STATE_COLORS[a.state as keyof typeof AGV_STATE_COLORS] || '#06b6d4',
+        state: a.state,
+        battery: Math.round(a.battery * 10) / 10,
+        loadStatus: a.loadStatus,
+        taskId: a.taskId,
+        pickupStationId: a.pickupStationId,
+        targetStationId: a.targetStationId,
+        targetChargerId: a.targetChargerId,
+        remainingSeconds: a.remainingSeconds,
+        completedTasks: a.completedTasks,
+        totalDistance: a.totalDistance,
+        type: a.type ?? 'tote_amr',
+        pathStrategy: strategy,
+        stationWaitSeconds: Number(tickRobot?.station_queue_wait_seconds ?? 0),
+      };
+    });
 
     // Explicit station/charger/arm components from the saved editor snapshot
     // take precedence over simulation-engine defaults.
@@ -702,12 +680,19 @@ export default function Simulation() {
       }));
 
     // Robotic arms
+    // Arms — drive each arm's state from the live backend arm_states
+    // stream when available, so AGV arrival at the station lights up the
+    // pick / place animation in real time.  Falls back to idle when the
+    // editor did not place a matching station or no arm_states payload
+    // is present yet.
+    const armStateById = new Map<string, 'idle' | 'working'>();
+    (backendTick?.arm_states ?? []).forEach((arm) => armStateById.set(arm.id, arm.state));
     const arms = usesSavedSceneLayout
       ? sceneComponents.filter((component) => component.type === 'arm').map((component) => ({
           id: component.id,
           x: component.x + component.width / 2,
           y: component.y + component.height / 2,
-          state: 'idle' as const,
+          state: armStateById.get(component.id) ?? 'idle' as 'idle' | 'working',
           stationId: String(component.properties.station_id ?? ''),
         }))
       : snapshot.arms.map((a) => ({
@@ -784,6 +769,21 @@ export default function Simulation() {
     const congestionScore = backendTick
       ? Math.min(1, backendTick.metrics.congestion_count / Math.max(totalAgvs, 1))
       : snapshot.metrics.congestionScore;
+    // Real utilization comes from backend runtime — it sums each robot's
+    // active_seconds against its total tracked time.  Only meaningful when
+    // the engine has actually advanced (has_runtime).  We deliberately
+    // avoid the cheap "active / total" ratio because it reports 100% the
+    // moment a robot is dispatched, even if it never moved.
+    const hasRuntime = Number(backendTick?.metrics?.has_runtime ?? 0) > 0;
+    const realUtilization = typeof backendTick?.metrics?.device_utilization === 'number'
+      ? backendTick.metrics.device_utilization
+      : null;
+    const completionValueText = completedTasks === 0
+      ? '—'
+      : `${(completionRate * 100).toFixed(1)}`;
+    const utilizationValueText = realUtilization === null
+      ? '—'
+      : `${Math.round(realUtilization * 100)}`;
 
     return [
       {
@@ -798,18 +798,24 @@ export default function Simulation() {
         title: '当前任务/完成',
         value: totalTasks,
         delta: completedTasks,
-        deltaLabel: '完成率',
+        deltaLabel: completedTasks === 0 ? '尚无完成' : '已完成',
         trend: 'up' as const,
         iconColor: '#06b6d4',
       },
       {
-        title: '平均等待时间',
+        // 真正有意义的"等待" = 工位排队等待 (station_queue_wait_seconds):
+        // AGV 到达工位后等待资源(站位/机械臂)空闲的时长，而非装卸服务本身。
+        // 派单等待(pending_wait_seconds)与站端服务耗时(station_wait_seconds)
+        // 作为副标题并列展示，三者口径已分离。
+        title: '工位排队等待',
         value: backendTick
-          ? (backendTick.metrics.average_wait_seconds ?? backendTick.metrics.average_duration).toFixed(1)
+          ? (backendTick.metrics.average_queue_wait_seconds ?? backendTick.metrics.average_wait_seconds ?? 0).toFixed(1)
           : snapshot.metrics.averageWaitSeconds.toFixed(1),
         unit: 's',
-        delta: backendTick ? Math.round(backendTick.metrics.max_wait_seconds ?? 0) : 0,
-        deltaLabel: '最大等待(s)',
+        delta: backendTick ? Math.round(backendTick.metrics.p95_queue_wait_seconds ?? backendTick.metrics.max_queue_wait_seconds ?? 0) : 0,
+        deltaLabel: backendTick && typeof backendTick.metrics.pending_wait_seconds === 'number'
+          ? `派单 ${backendTick.metrics.pending_wait_seconds.toFixed(1)}s / 服务 ${(backendTick.metrics.average_wait_seconds ?? 0).toFixed(1)}s`
+          : '派单/服务(s)',
         trend: 'flat' as const,
         iconColor: '#22c55e',
       },
@@ -823,21 +829,19 @@ export default function Simulation() {
       },
       {
         title: '任务完成率',
-        value: (completionRate * 100).toFixed(1),
-        unit: '%',
+        value: completionValueText,
+        unit: completedTasks === 0 ? '' : '%',
         delta: completedTasks,
-        deltaLabel: '完成数',
+        deltaLabel: completedTasks === 0 ? '尚未有任务完成' : '完成数',
         trend: 'up' as const,
         iconColor: '#22c55e',
       },
       {
         title: '设备利用率',
-        value: Math.round(
-          (backendTick ? activeAgvs / Math.max(totalAgvs, 1) : snapshot.metrics.utilization) * 100,
-        ),
-        unit: '%',
+        value: utilizationValueText,
+        unit: realUtilization === null ? '' : '%',
         delta: 0,
-        deltaLabel: '综合',
+        deltaLabel: hasRuntime ? '基于运行时间' : '尚未运行',
         trend: 'flat' as const,
         iconColor: '#ec4899',
       },
@@ -849,23 +853,27 @@ export default function Simulation() {
   const selectedShelf = sim3DProps.shelves?.find((shelf) => shelf.id === selectedShelfId) ?? null;
   // The server tick is the runtime authority. The local snapshot supplies
   // only static editor geometry (shelves, stations and walls).
-  const runtimeTasks = useMemo<Task[]>(() => backendTick?.task_items?.map((task) => ({
+  const runtimeTasks = useMemo<Task[]>(() => backendTick?.task_items?.map((task) => {
+    const priority = task.priority ?? 0;
+    return {
     id: task.id,
-    type: task.kind,
-    status: task.status === 'active' ? 'running' : task.status,
+    type: (task.kind ?? 'inbound') as Task['type'],
+    status: task.status === 'active' ? 'running' : task.status === 'completed' ? 'completed' : 'pending',
     assignedAgvId: task.assigned_robot ?? undefined,
     pickupStationId: task.source,
     toStationId: task.destination,
-    priority: task.priority >= 4 ? 'high' : task.priority <= 1 ? 'low' : 'normal',
+    priority: priority >= 4 ? 'high' : priority <= 1 ? 'low' : 'normal',
     progress: task.status === 'completed' ? 1 : task.status === 'active' ? 0.5 : 0,
     etaSeconds: task.status === 'completed' ? 0 : Math.max(0, Number(task.waiting_seconds ?? 0)),
     createdAt: Number(task.created_at ?? 0),
     startedAt: task.started_at ?? undefined,
     completedAt: task.completed_at ?? undefined,
-  })) ?? snapshot?.tasks ?? [], [backendTick?.task_items, snapshot?.tasks]);
+    };
+  }) ?? snapshot?.tasks ?? [], [backendTick?.task_items, snapshot?.tasks]);
   const cargoList = backendTick?.cargos?.map((cargo) => ({
-    id: cargo.id, sku: cargo.sku, type: cargo.type, quantity: cargo.quantity,
-    weight: cargo.weight, status: cargo.status, locationId: cargo.location_id, orderId: cargo.order_id,
+    id: cargo.id, sku: cargo.sku ?? '', type: (cargo.type ?? 'tote') as 'tote' | 'carton' | 'pallet',
+    quantity: cargo.quantity ?? 0, weight: cargo.weight ?? 0, status: cargo.status ?? '',
+    locationId: cargo.location_id ?? '', orderId: cargo.order_id,
   })) ?? snapshot?.cargos ?? [];
   const shippedCount = cargoList.filter((c) => c.status === 'shipped').length;
   const onShelfCount = cargoList.filter((c) => c.status === 'on_shelf').length;
@@ -911,8 +919,8 @@ export default function Simulation() {
   if (runtimeView !== 'overview' && runtimeView !== 'simulation' && runtimeView !== 'live') {
     return (<>
       <ProjectContextBar
-        projectId={projectId}
-        scenarioId={scenarioId}
+        projectId={projectId ?? ''}
+        scenarioId={scenarioId ?? undefined}
         simulationId={simulationId}
         simulationStatus={status}
       />
@@ -959,14 +967,35 @@ export default function Simulation() {
         />
       )}
       <ProjectContextBar
-        projectId={projectId}
-        scenarioId={scenarioId}
+        projectId={projectId ?? ''}
+        scenarioId={scenarioId ?? undefined}
         simulationId={simulationId}
         simulationStatus={status}
       />
+
+      {/* 项目名称 Hero 头部 — 紧凑展示，避免占满整行 */}
+      <div className="sim-hero">
+        <div className="sim-hero-left">
+          <h2 className="sim-hero-name" title={currentProject?.name}>
+            {currentProject?.name ?? '暂无项目'}
+          </h2>
+          <div className="sim-hero-breadcrumb">
+            <span>{currentScenario?.name ?? '—'}</span>
+          </div>
+        </div>
+        <div className="sim-hero-right">
+          <div className={`sim-hero-status ${status === 'running' ? 'is-running' : status === 'paused' ? 'is-paused' : ''}`}>
+            <span className="live-dot" />
+            <span>
+              {status === 'running' ? '运行中' : status === 'paused' ? '已暂停' : '未启动'}
+            </span>
+          </div>
+        </div>
+      </div>
+
       <div className="kpi-row">
         {kpis.map((kpi) => (
-          <Card className="kpi-card" key={kpi.title} bordered={false}>
+          <Card className="kpi-card" key={kpi.title} variant="borderless">
             <Statistic title={kpi.title} value={kpi.value} suffix={kpi.unit} valueStyle={{ color: kpi.iconColor, fontWeight: 700 }} />
             <div style={{ marginTop: 8, color: '#64748b', fontSize: 12 }}>{kpi.deltaLabel}: {kpi.delta}</div>
           </Card>
@@ -984,7 +1013,7 @@ export default function Simulation() {
               <div className="canvas-area">
                 <SimView3D {...sim3DProps} />
                 <div className="scene-hud scene-hud-bottom" aria-label="设备状态图例">
-                  {Object.entries(AGV_STATE_COLORS).slice(0, 5).map(([name, color]) => <span className="scene-legend-chip" key={name}><i style={{ background: color, color }} />{name}</span>)}
+                  {(Object.entries(AGV_STATE_BADGES).slice(0, 5)).map(([name, info]) => <span className="scene-legend-chip" key={name}><i style={{ background: AGV_STATE_COLORS[name as keyof typeof AGV_STATE_COLORS] || '#3b82f6' }} />{info.label}</span>)}
                 </div>
               </div>
             </div>
@@ -1001,16 +1030,122 @@ export default function Simulation() {
           </div>
 
           <div className="sim-info-grid">
-            <Card title="实时事件" size="small"><div className="event-list">{events.length ? events.slice(0, 6).map((event) => <div className="event-row" key={event.id}><span className="event-time num-font">{event.time}</span><span className="event-level">{levelIcon[event.level]}</span><span className="event-msg">{event.message}</span></div>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无运行事件" />}</div></Card>
-            <Card title="运行摘要" size="small"><div className="info-table"><div className="info-row"><span>场景来源</span><b>{usesSavedSceneLayout ? '已保存编辑器场景' : '默认场景'}</b></div><div className="info-row"><span>布局组件</span><b>{sceneStats.shelves + sceneStats.agvs + sceneStats.arms + sceneStats.stations + sceneStats.chargers}</b></div><div className="info-row"><span>已发货货物</span><b>{shippedCount}</b></div><div className="info-row"><span>货架中 / 运输中</span><b>{onShelfCount} / {onAgvCount}</b></div></div></Card>
+            <Card title="实时任务日志" size="small"><div className="event-list">{events.length ? events.slice(0, 6).map((event) => <div className="event-row" key={event.id}><span className="event-time num-font">{event.time}</span><span className="event-level">{levelIcon[event.level]}</span><span className="event-msg">{event.message}</span></div>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无运行事件" />}</div></Card>
+            <Card title="仿真信息" size="small"><div className="info-table"><div className="info-row"><span>场景来源</span><b>{usesSavedSceneLayout ? '已保存编辑器场景' : '默认场景'}</b></div><div className="info-row"><span>布局组件</span><b>{sceneStats.shelves + sceneStats.agvs + sceneStats.arms + sceneStats.stations + sceneStats.chargers}</b></div><div className="info-row"><span>已发货货物</span><b>{shippedCount}</b></div><div className="info-row"><span>货架中 / 运输中</span><b>{onShelfCount} / {onAgvCount}</b></div></div></Card>
           </div>
         </div>
 
         <aside className="sim-aside">
           <Card title="AGV 状态与详情" size="small">
-            <div className="agent-list">{displayAgvs.map((agv) => <button type="button" className={`agent-card ${selectedAgvId === agv.id ? 'is-selected' : ''}`} key={agv.id} onClick={() => setSelectedAgvId(agv.id)}><div className="agent-header"><span><i className="status-dot info" />{agv.name}</span><b style={{ color: AGV_STATE_COLORS[agv.state] }}>{agv.battery.toFixed(0)}%</b></div><small>{agv.state} · {agv.loadStatus === 'loaded' ? '载货' : '空载'}</small></button>)}</div>
-            {selectedAgv && <div className="selected-agv-detail"><b>{selectedAgv.name}</b><span>任务：{selectedAgv.taskId ?? '待命'}</span><span>坐标：{selectedAgv.position.x.toFixed(0)}, {selectedAgv.position.y.toFixed(0)}</span></div>}
-            {selectedShelf && <div className="selected-agv-detail"><b>货架 {selectedShelf.id}</b><span>层数：{selectedShelf.levels ?? 1}</span><span>占地：{selectedShelf.w.toFixed(0)} × {selectedShelf.h.toFixed(0)}</span><span>坐标：{selectedShelf.x.toFixed(0)}, {selectedShelf.y.toFixed(0)}</span></div>}
+            <div className="agent-list">
+              {displayAgvs.map((agv) => {
+                const st = agv.state || 'idle';
+                const badgeInfo = AGV_STATE_BADGES[st] ?? { label: st, cls: 'badge-gray' };
+                const battery = agv.battery;
+                const isLow = battery < 25;
+                const tickRobot = backendTick?.robots?.find((r) => r.id === agv.id);
+                const strategy = (tickRobot?.path_strategy as keyof typeof AGV_PATH_STRATEGY_LABELS) ?? 'balanced';
+                const strategyLabel = AGV_PATH_STRATEGY_LABELS[strategy] ?? '均衡调度';
+                const strategyColor = AGV_PATH_STRATEGY_COLORS[strategy] ?? '#22c55e';
+                const stationWait = Number(tickRobot?.station_wait_seconds ?? 0);
+                return (
+                  <button
+                    type="button"
+                    className={`agent-card state-${st} ${selectedAgvId === agv.id ? 'is-selected' : ''}`}
+                    key={agv.id}
+                    onClick={() => setSelectedAgvId(agv.id)}
+                  >
+                    <div className="agent-row1">
+                      <span className="agent-id">
+                        <span className="status-dot" />
+                        {agv.name}
+                      </span>
+                      <span className={`state-badge ${badgeInfo.cls}`}>{badgeInfo.label}</span>
+                    </div>
+                    <div className="agent-row1 agent-strategy-row">
+                      <span className="agent-strategy-label">路径策略</span>
+                      <span className="agent-strategy-pill" style={{ borderColor: strategyColor, color: strategyColor }}>
+                        <i style={{ background: strategyColor }} />
+                        {strategyLabel}
+                      </span>
+                    </div>
+                    <div className={`battery-bar ${isLow ? 'low' : ''}`} style={{ '--battery-pct': `${battery}%` } as React.CSSProperties} />
+                    <div className="agent-stats-line">
+                      <span>电量</span>
+                      <span className={`battery-pct ${isLow ? 'low' : ''}`}>{battery.toFixed(0)}%</span>
+                      <span className="agent-wait">站端 {stationWait.toFixed(1)}s</span>
+                    </div>
+                    <div className="agent-row2">
+                      <span className={`load-badge ${agv.loadStatus === 'loaded' ? 'loaded' : ''}`}>
+                        <i /> {agv.loadStatus === 'loaded' ? '载货中' : '空载'}
+                      </span>
+                      {agv.taskId && <span style={{ color: '#64748b' }}>任务 {agv.taskId}</span>}
+                      {!agv.taskId && st === 'idle' && <span style={{ color: '#94a3b8' }}>待命中</span>}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            {selectedAgv && (() => {
+              const st = selectedAgv.state || 'idle';
+              const badgeInfo = AGV_STATE_BADGES[st] ?? { label: st, cls: 'badge-gray' };
+              return (
+                <div className="selected-agv-detail">
+                  <div className="detail-title">
+                    <i>{selectedAgv.name.replace(/^agv-/i, '')}</i>
+                    <span>{selectedAgv.name}</span>
+                    <span className={`state-badge ${badgeInfo.cls}`} style={{ marginLeft: 'auto' }}>{badgeInfo.label}</span>
+                  </div>
+                  <div className="detail-grid">
+                    <div className="detail-cell">
+                      <span className="detail-cell-label">当前任务</span>
+                      <span className="detail-cell-value">{selectedAgv.taskId ?? '待命'}</span>
+                    </div>
+                    <div className="detail-cell">
+                      <span className="detail-cell-label">电量</span>
+                      <span className="detail-cell-value">{selectedAgv.battery.toFixed(0)}%</span>
+                    </div>
+                    <div className="detail-cell">
+                      <span className="detail-cell-label">负载状态</span>
+                      <span className="detail-cell-value">{selectedAgv.loadStatus === 'loaded' ? '载货中' : '空载'}</span>
+                    </div>
+                    <div className="detail-cell">
+                      <span className="detail-cell-label">坐标</span>
+                      <span className="detail-cell-value">{selectedAgv.position.x.toFixed(0)}, {selectedAgv.position.y.toFixed(0)}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+            {selectedShelf && (
+              <div className="selected-agv-detail">
+                <div className="detail-title">
+                  <i>📦</i>
+                  <span>货架 {selectedShelf.id}</span>
+                </div>
+                <div className="detail-grid">
+                  <div className="detail-cell">
+                    <span className="detail-cell-label">层数</span>
+                    <span className="detail-cell-value">{selectedShelf.levels ?? 1}</span>
+                  </div>
+                  <div className="detail-cell">
+                    <span className="detail-cell-label">占地 (宽×高)</span>
+                    <span className="detail-cell-value">{selectedShelf.w.toFixed(0)} × {selectedShelf.h.toFixed(0)}</span>
+                  </div>
+                  <div className="detail-cell">
+                    <span className="detail-cell-label">坐标</span>
+                    <span className="detail-cell-value">{selectedShelf.x.toFixed(0)}, {selectedShelf.y.toFixed(0)}</span>
+                  </div>
+                  <div className="detail-cell">
+                    <span className="detail-cell-label">颜色</span>
+                    <span className="detail-cell-value" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ width: 14, height: 14, borderRadius: 4, background: selectedShelf.color ?? '#94a3b8', display: 'inline-block' }} />
+                      {selectedShelf.color ?? '默认'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
           </Card>
         </aside>
       </div>

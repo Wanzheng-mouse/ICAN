@@ -60,6 +60,10 @@ export class WsClient {
         if (data?.type === 'pong') return;
         this.opts.onMessage?.(data);
       } catch {
+        // Non-JSON payload: likely a protocol-level error or binary frame.
+        // Forward to onError so the consumer can log / surface the anomaly
+        // instead of silently dropping the message.
+        this.opts.onError?.(new ErrorEvent('message', { message: `Non-JSON WebSocket message received: ${String(event.data)}` }));
         this.opts.onMessage?.(event.data);
       }
     };

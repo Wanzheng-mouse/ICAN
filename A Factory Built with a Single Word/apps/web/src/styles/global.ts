@@ -39,6 +39,17 @@ export const GlobalStyle = createGlobalStyle`
     box-sizing: border-box;
   }
 
+  :root {
+    --ican-navy: #071a3a;
+    --ican-ink: #12213f;
+    --ican-blue: #2563eb;
+    --ican-cyan: #24c5e8;
+    --ican-canvas: #f4f7fc;
+    --ican-card: rgba(255, 255, 255, 0.96);
+    --ican-line: #e5ebf5;
+    --ican-shadow: 0 14px 38px rgba(25, 52, 94, 0.08);
+  }
+
   /* 滚动条 */
   ::-webkit-scrollbar {
     width: 8px;
@@ -117,7 +128,7 @@ export const GlobalStyle = createGlobalStyle`
 
   /* 页面通用 padding */
   .page-container {
-    padding: 28px 32px 36px;
+    padding: 24px 32px 36px;
     min-height: calc(100vh - 60px);
   }
   .page-container-wide {
@@ -132,12 +143,12 @@ export const GlobalStyle = createGlobalStyle`
 
   /* 章节卡片 */
   .section-card {
-    background: #fff;
-    border-radius: 16px;
-    border: 1px solid rgba(220, 228, 240, 0.9);
+    background: var(--ican-card);
+    border-radius: 14px;
+    border: 1px solid var(--ican-line);
     padding: 22px 24px;
     margin-bottom: 18px;
-    box-shadow: 0 10px 30px rgba(30, 52, 93, 0.045);
+    box-shadow: var(--ican-shadow);
   }
   .section-title {
     font-size: 16px;
@@ -155,5 +166,44 @@ export const GlobalStyle = createGlobalStyle`
     align-items: center;
     justify-content: center;
     color: #2b6fff;
+  }
+
+  /* Shared workspace grammar for Home, Resource, Report, Projects and Help.
+     Pages keep their domain-specific content but read as one application. */
+  .page-container > :first-child,
+  .page-container-wide > :first-child,
+  .page-container-narrow > :first-child {
+    animation: ican-page-enter .38s cubic-bezier(.22, .8, .25, 1) both;
+  }
+  .section-card, .ant-card {
+    transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+  }
+  .section-card:hover, .ant-card:not(.ant-card-bordered):hover {
+    border-color: rgba(91, 134, 255, .28) !important;
+  }
+  .ant-btn-primary {
+    background: linear-gradient(135deg, #2563eb 0%, #3578ff 100%) !important;
+    border-color: transparent !important;
+  }
+  .ant-btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 10px 20px rgba(37, 99, 235, .22) !important;
+  }
+  .ant-table-wrapper .ant-table {
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .ant-table-thead > tr > th {
+    background: #f8faff !important;
+    color: #60708c !important;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  @keyframes ican-page-enter {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @media (max-width: 960px) {
+    .page-container, .page-container-wide, .page-container-narrow { padding: 18px 16px 28px; }
   }
 `;

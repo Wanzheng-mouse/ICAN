@@ -10,7 +10,7 @@ import {
   ThunderboltOutlined,
 } from '@ant-design/icons';
 import { SectionCard } from '@/components';
-import { learningPath } from '@ican/mock-data';
+import { useLearningPath } from '@/api/modules';
 import './index.css';
 
 const helpCategories = [
@@ -31,6 +31,7 @@ const faqs = [
 ];
 
 export default function Help() {
+  const { data: learningPath } = useLearningPath();
   return (
     <div className="help-page">
       {/* Hero */}
@@ -64,7 +65,7 @@ export default function Help() {
       {/* 学习路径 */}
       <SectionCard title="🎓 推荐学习路径">
         <div className="help-learning">
-          {learningPath.map((p) => (
+          {(learningPath ?? []).map((p) => (
             <div key={p.index} className="help-learning-step">
               <div className="help-learning-index">{p.index}</div>
               <div className="help-learning-body">

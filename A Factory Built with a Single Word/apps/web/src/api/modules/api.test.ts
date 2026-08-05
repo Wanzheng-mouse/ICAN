@@ -1,172 +1,135 @@
 /**
- * 领域 API mock 模式单元测试
- * 验证 VITE_USE_MOCK=true 时各 API 函数返回 mock 数据
+ * 领域 API contract 守卫
+ *
+ * 前端模块层只做「URL + 方法 + 入参」的封装，数据契约由后端 OpenAPI
+ * 与 api/dtos 保证。这里将 axios 客户端 mock 成内存存储，断言每个模块
+ * 仍然调用约定的真实路径与 HTTP 方法，并原样透传响应 —— 无需启动后端，
+ * 也不会把契约测试变成脆弱的网络测试。
  */
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-describe('领域 API mock 模式', () => {
-  it('homeStaticData 同步返回 mock', async () => {
-    const { homeStaticData } = await import('@/api/modules');
-    expect(homeStaticData.cards().length).toBeGreaterThan(0);
-    expect(homeStaticData.features().length).toBeGreaterThan(0);
-    expect(homeStaticData.steps().length).toBe(7);
-    expect(homeStaticData.uploadItems().length).toBe(4);
-  });
-
-  it('getTemplates mock 返回所有场景模板', async () => {
-    const { getTemplates } = await import('@/api/modules');
-    const all = await getTemplates();
-    expect(all.length).toBeGreaterThan(0);
-    expect(all[0]).toHaveProperty('id');
-    expect(all[0]).toHaveProperty('title');
-    expect(all[0]).toHaveProperty('category');
-  });
-
-  it('getTemplates 按 category 过滤', async () => {
-    const { getTemplates } = await import('@/api/modules');
-    const scenes = await getTemplates('scene');
-    expect(scenes.every((s) => s.category === 'scene')).toBe(true);
-    const strategies = await getTemplates('strategy');
-    expect(strategies.every((s) => s.category === 'strategy')).toBe(true);
-  });
-
-  it('模板详情可直接应用并返回真实项目与场景关联', async () => {
-    const { applyTemplate, createProject, getTemplateById } = await import('@/api/modules');
-    const template = await getTemplateById('tpl-1');
-    expect(template?.data.components.length).toBeGreaterThan(0);
-
-    const project = await createProject({ name: 'Template project' });
-    const scenario = await applyTemplate('tpl-1', { project_id: project.id });
-    expect(scenario.project_id).toBe(project.id);
-    expect(scenario.data).toEqual(template?.data);
-  });
-  it('场景校验、自动布局和版本历史在 Mock 模式保持同一契约', async () => {
-    const {
-      autoLayoutScenario,
-      createScenario,
-      getScenarioVersions,
-      validateScenario,
-    } = await import('@/api/modules');
-    const scenario = await createScenario({ project_id: 'project-1', name: 'Scene' });
-    const validation = await validateScenario(scenario.id, scenario.data.components);
-    const layout = await autoLayoutScenario(scenario.id, scenario.data.components);
-    const versions = await getScenarioVersions(scenario.id);
-
-    expect(validation.valid).toBe(true);
-    expect(layout.validation.valid).toBe(true);
-    expect(versions[0].scenario_id).toBe(scenario.id);
-    expect(versions[0].version).toBe(1);
-  });
-  it('getSimulation mock 返回运行信息', async () => {
-    const { getSimulation } = await import('@/api/modules');
-    const run = await getSimulation('mock');
-    expect(run).toHaveProperty('id');
-    expect(run).toHaveProperty('version');
-  });
-
-  it('getSimulationAgents mock 返回 5 个智能体', async () => {
-    const { getSimulationAgents } = await import('@/api/modules');
-    const agents = await getSimulationAgents('mock');
-    expect(agents.length).toBeGreaterThanOrEqual(4);
-    expect(agents[0]).toHaveProperty('name');
-    expect(agents[0]).toHaveProperty('role');
-  });
-
-  it('getEvolutionReport mock 返回完整报告', async () => {
-    const { getEvolutionReport } = await import('@/api/modules');
-    const report = await getEvolutionReport('mock');
-    expect(report).toHaveProperty('id');
-    expect(report).toHaveProperty('metrics');
-    expect(report).toHaveProperty('versions');
-    expect(report.metrics.length).toBeGreaterThan(0);
-  });
-
-  it('getReportKpis mock 返回 6 个 KPI', async () => {
-    const { getReportKpis } = await import('@/api/modules');
-    const kpis = await getReportKpis('mock');
-    expect(kpis.length).toBe(6);
-  });
-
-  it('getResourceTemplates 与 getTemplates 一致', async () => {
-    const { getResourceTemplates, getTemplates } = await import('@/api/modules');
-    const a = await getResourceTemplates();
-    const b = await getTemplates();
-    expect(a.length).toBe(b.length);
-  });
-
-  it('controlSimulation 在 mock 模式下返回更新后的运行快照', async () => {
-    const { controlSimulation } = await import('@/api/modules');
-    await expect(controlSimulation('mock', 'start')).resolves.toMatchObject({ status: 'running' });
-    await expect(controlSimulation('mock', 'pause')).resolves.toMatchObject({ status: 'paused' });
-    await expect(controlSimulation('mock', 'stop')).resolves.toMatchObject({ status: 'stopped' });
-  });
-
-  it('injectAnomaly 在 mock 模式下返回运行快照', async () => {
-    const { injectAnomaly } = await import('@/api/modules');
-    await expect(injectAnomaly('mock', 'road_closed')).resolves.toMatchObject({ id: 'mock' });
-  });
+const store = vi.hoisted(() => {
+  const projects: Array<Record<string, unknown>> = [];
+  const scenarios: Array<Record<string, unknown>> = [];
+  const simulations: Array<Record<string, unknown>> = [];
+  const calls: Array<{ method: string; url: string; data?: unknown }> = [];
+  return { projects, scenarios, simulations, calls };
 });
 
-describe('认证 API mock', () => {
-  it('mockRegister 创建账号后可立即登录', async () => {
-    const { mockLogin, mockRegister } = await import('@/api/modules');
-    const suffix = Date.now().toString();
-    const result = await mockRegister({
-      loginName: `user_${suffix}`,
-      name: 'New User',
-      email: `user_${suffix}@example.com`,
-      password: 'password123',
+vi.mock('@/api/client', () => ({
+  BASE_URL: '',
+  client: {},
+  request: vi.fn(async (config: { url?: string; method?: string; data?: unknown; params?: unknown }) => {
+    const url = String(config.url ?? '');
+    const method = (config.method ?? 'GET').toUpperCase();
+    store.calls.push({ method, url, data: config.data });
+
+    if (method === 'POST' && url.endsWith('/projects')) {
+      const payload = config.data as { name?: string; requirement?: string };
+      const project = {
+        id: `proj-${store.projects.length + 1}`,
+        name: payload?.name ?? '',
+        requirement: payload?.requirement ?? '',
+        status: 'draft',
+        created_at: new Date().toISOString(),
+      };
+      store.projects.push(project);
+      return project;
+    }
+    if (method === 'GET' && url.endsWith('/projects')) {
+      return [...store.projects];
+    }
+    if (method === 'POST' && url.endsWith('/scenarios')) {
+      const payload = config.data as { project_id?: string; name?: string; data?: unknown };
+      const scenario = {
+        id: `scn-${store.scenarios.length + 1}`,
+        project_id: payload?.project_id ?? '',
+        name: payload?.name ?? '',
+        data: payload?.data ?? {},
+        version: 1,
+        updated_at: new Date().toISOString(),
+      };
+      store.scenarios.push(scenario);
+      return scenario;
+    }
+    if (method === 'GET' && /\/scenarios\/[^/]+$/.test(url)) {
+      const id = url.split('/').pop();
+      const scenario = store.scenarios.find((item) => item.id === id);
+      if (!scenario) throw new Error(`missing scenario ${id}`);
+      return scenario;
+    }
+    if (method === 'POST' && url.endsWith('/simulations')) {
+      const payload = config.data as { project_id?: string; scenario_id?: string };
+      const simulation = {
+        id: `sim-${store.simulations.length + 1}`,
+        project_id: payload?.project_id ?? '',
+        scenario_id: payload?.scenario_id ?? '',
+        status: 'created',
+        config: { scenario_snapshot: { schema_version: '1.0' }, order_count: 5 },
+        metrics: {},
+        events: [],
+        created_at: new Date().toISOString(),
+      };
+      store.simulations.push(simulation);
+      return simulation;
+    }
+    throw new Error(`unhandled request in contract mock: ${method} ${url}`);
+  }),
+}));
+
+describe('领域 API contract 守卫', () => {
+  beforeEach(() => {
+    store.projects.length = 0;
+    store.scenarios.length = 0;
+    store.simulations.length = 0;
+    store.calls.length = 0;
+  });
+
+  it('createProject / getProjects 返回一致结构', async () => {
+    const { createProject, getProjects } = await import('@/api/modules');
+    const project = await createProject({ name: 'Contract Test', requirement: 'test' });
+    expect(project.id).toBeTruthy();
+    expect(project.name).toBe('Contract Test');
+
+    const projects = await getProjects();
+    expect(projects.some((p) => p.id === project.id)).toBe(true);
+
+    expect(store.calls.map((c) => `${c.method} ${c.url}`)).toEqual([
+      'POST /api/v1/projects',
+      'GET /api/v1/projects',
+    ]);
+  });
+
+  it('createScenario / getScenario 可通过 id 读取', async () => {
+    const { createProject, createScenario, getScenario } = await import('@/api/modules');
+    const project = await createProject({ name: 'Scenario Test' });
+    const scn = await createScenario({
+      project_id: project.id,
+      name: 'Test Scene',
+      data: { schema_version: '1.0', canvas: { width: 1200, height: 800, scale: 1 }, components: [] },
     });
-    expect(result.user.role).toBe('operator');
-    await expect(mockLogin({ username: `user_${suffix}`, password: 'password123' })).resolves.toMatchObject({
-      user: { email: `user_${suffix}@example.com` },
+    const read = await getScenario(scn.id);
+    expect(read.id).toBe(scn.id);
+    expect(read.name).toBe('Test Scene');
+
+    expect(store.calls.map((c) => `${c.method} ${c.url}`)).toEqual([
+      'POST /api/v1/projects',
+      'POST /api/v1/scenarios',
+      `GET /api/v1/scenarios/${scn.id}`,
+    ]);
+  });
+
+  it('createSimulation 返回 scenario_snapshot', async () => {
+    const { createProject, createScenario, createSimulation } = await import('@/api/modules');
+    const project = await createProject({ name: 'Sim Test' });
+    const scn = await createScenario({
+      project_id: project.id,
+      name: 'Sim Scene',
+      data: { schema_version: '1.0', canvas: { width: 1200, height: 800, scale: 1 }, components: [] },
     });
-  });
-
-  it('mockLogin 支持演示管理员登录名', async () => {
-    const { mockLogin } = await import('@/api/modules');
-    const result = await mockLogin({ username: 'admin', password: 'ican2026' });
-    expect(result.user.role).toBe('admin');
-  });
-
-  it('mockLogin 正确账号返回 token 和 user', async () => {
-    const { mockLogin } = await import('@/api/modules');
-    const result = await mockLogin({ username: 'Wanzheng', password: 'ican2026' });
-    expect(result).toHaveProperty('token');
-    expect(result.user.name).toBe('Wanzheng');
-  });
-
-  it('mockLogin 支持邮箱登录', async () => {
-    const { mockLogin } = await import('@/api/modules');
-    const result = await mockLogin({ username: 'admin@ican-platform.com', password: 'ican2026' });
-    expect(result.user.role).toBe('admin');
-  });
-
-  it('mockLogin 错误密码抛错', async () => {
-    const { mockLogin } = await import('@/api/modules');
-    await expect(mockLogin({ username: 'Wanzheng', password: 'wrong' })).rejects.toThrow('账号或密码错误');
-  });
-
-  it('mockLogout 成功返回', async () => {
-    const { mockLogout } = await import('@/api/modules');
-    await expect(mockLogout()).resolves.toBeUndefined();
-  });
-
-  it('mockUpdateProfile 更新当前用户昵称', async () => {
-    const { mockUpdateProfile } = await import('@/api/modules');
-    const result = await mockUpdateProfile('u-001', { name: 'AdminNew' });
-    expect(result.name).toBe('AdminNew');
-  });
-
-  it('mockChangePassword 验证原密码后更新', async () => {
-    const { mockChangePassword, mockLogin, resetUserDB } = await import('@/api/modules');
-    resetUserDB();
-    await mockChangePassword('u-001', 'ican2026', 'newPwd123');
-    // 新密码可登录
-    const login = await mockLogin({ username: 'Wanzheng', password: 'newPwd123' });
-    expect(login.user.id).toBe('u-001');
-    // 旧密码不可登录
-    await expect(mockLogin({ username: 'Wanzheng', password: 'ican2026' })).rejects.toThrow('账号或密码错误');
-    resetUserDB();
+    const sim = await createSimulation({ project_id: project.id, scenario_id: scn.id, order_count: 5 });
+    expect(sim.id).toBeTruthy();
+    expect(sim.config.scenario_snapshot).toBeDefined();
+    expect(store.calls.some((c) => c.method === 'POST' && c.url.endsWith('/simulations'))).toBe(true);
   });
 });

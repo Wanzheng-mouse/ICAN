@@ -285,7 +285,7 @@ export default function Report() {
           </div>
           <div className="filter-item">
             <span className="filter-label">时间范围</span>
-            <DatePicker.RangePicker disabled />
+            <DatePicker.RangePicker disabled allowEmpty={[true, true]} />
           </div>
           <div className="filter-item">
             <span className="filter-label">运行版本</span>

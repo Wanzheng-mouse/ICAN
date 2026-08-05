@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { Breadcrumb, Button, Space, Tag } from 'antd';
-import { FolderOpenOutlined, EditOutlined, HomeOutlined } from '@ant-design/icons';
+import { EditOutlined, HomeOutlined } from '@ant-design/icons';
 import { useProjectWorkspace, useScenario } from '@/api/modules';
 
 interface Props {
@@ -10,6 +10,22 @@ interface Props {
   simulationStatus?: string;
   /** Extra action buttons shown on the right */
   actions?: React.ReactNode[];
+}
+
+/** Map raw simulation status to a localised Chinese label + tone. */
+const SIMULATION_STATUS_MAP: Record<string, { label: string; color: string }> = {
+  running: { label: '运行中', color: 'green' },
+  paused: { label: '已暂停', color: 'gold' },
+  stopped: { label: '已停止', color: 'red' },
+  completed: { label: '已完成', color: 'blue' },
+  created: { label: '未启动', color: 'default' },
+  failed: { label: '异常', color: 'volcano' },
+  draft: { label: '草稿', color: 'default' },
+};
+
+function resolveSimulationStatus(status: string | undefined) {
+  if (!status) return null;
+  return SIMULATION_STATUS_MAP[status] ?? { label: status, color: 'blue' };
 }
 
 export function ProjectContextBar({ projectId, scenarioId, simulationId, simulationStatus, actions }: Props) {
@@ -32,7 +48,12 @@ export function ProjectContextBar({ projectId, scenarioId, simulationId, simulat
     });
   }
   if (simulationId) {
-    items.push({ title: simulationStatus ? <Tag color="blue">{simulationStatus}</Tag> : '仿真运行' });
+    const resolved = resolveSimulationStatus(simulationStatus);
+    items.push({
+      title: resolved
+        ? <Tag color={resolved.color}>{resolved.label}</Tag>
+        : '仿真运行',
+    });
   }
 
   return (

@@ -192,6 +192,29 @@ export interface AgvData {
 }
 
 // 前端 3D 可视化用 AGV 数据 (简化)
+export type AgvPathStrategy =
+  | 'shortest'
+  | 'balanced'
+  | 'congestion_aware'
+  | 'priority_lane'
+  | 'detour';
+
+export const AGV_PATH_STRATEGY_COLORS: Record<AgvPathStrategy, string> = {
+  shortest: '#3b82f6',
+  balanced: '#22c55e',
+  congestion_aware: '#a855f7',
+  priority_lane: '#f59e0b',
+  detour: '#ef4444',
+};
+
+export const AGV_PATH_STRATEGY_LABELS: Record<AgvPathStrategy, string> = {
+  shortest: '最短路径',
+  balanced: '均衡调度',
+  congestion_aware: '拥堵规避',
+  priority_lane: '优先通道',
+  detour: '绕行策略',
+};
+
 export interface Agv3D {
   id: string;
   name?: string;
@@ -213,6 +236,8 @@ export interface Agv3D {
   totalDistance?: number;
   yieldCount?: number;
   etSeconds?: number;
+  pathStrategy?: AgvPathStrategy;
+  stationWaitSeconds?: number;
 }
 
 // ============================================================

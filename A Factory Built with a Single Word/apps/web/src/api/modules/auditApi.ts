@@ -1,8 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
 import { request } from '@/api/client';
-import { isMockEnabled } from '@/api/mockConfig';
-
-const USE_MOCK = isMockEnabled('audit');
 import { apiUrl } from '@/utils/apiUrl';
 
 export interface AuditLogRead {
@@ -16,7 +13,6 @@ export interface AuditLogRead {
 }
 
 export async function getAuditLogs(limit = 200): Promise<AuditLogRead[]> {
-  if (USE_MOCK) return [];
   return request({ url: apiUrl('/audit-logs'), params: { limit } });
 }
 

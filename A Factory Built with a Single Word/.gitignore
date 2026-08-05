@@ -16,6 +16,8 @@ out/
 # vite.config.js is emitted from vite.config.ts by the current TS build;
 # vite.config.ts remains the only source of truth.
 /apps/web/vite.config.js
+# Vite also emits a timestamped temp config while reloading on Windows.
+/apps/web/vite.config.js.timestamp-*.mjs
 
 # Test coverage, browser-test artifacts and caches
 coverage/
@@ -45,6 +47,12 @@ lerna-debug.log*
 .env.*.local
 .env.*.secret
 .envrc
+# Local .env backups (may contain secrets) — never commit
+.env.bak
+*.env.bak
+
+# Stray tool caches (e.g. pre-commit cache when HOME points into the repo).
+~/
 
 # ------------------------------------------------------------
 # Python / FastAPI（services）
@@ -74,6 +82,9 @@ pip-wheel-metadata/
 *.whl
 *.sqlite3
 *.db
+# DB backups (never commit)
+*.db.bak
+*.stale.bak
 .ipynb_checkpoints/
 
 # ------------------------------------------------------------
@@ -105,7 +116,15 @@ $RECYCLE.BIN/
 
 uploads/
 # PowerShell null redirect artifact
-\
-
 .agnes/
 .workbuddy/
+
+# ------------------------------------------------------------
+# Test artifacts (M8, 2026-07-26)
+# Throwaway test databases and coverage output must never be committed.
+# ------------------------------------------------------------
+.test-*.db
+*.test-*.db
+tests/.artifacts/
+coverage.xml
+htmlcov/

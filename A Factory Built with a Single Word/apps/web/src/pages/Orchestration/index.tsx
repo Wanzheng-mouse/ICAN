@@ -18,6 +18,7 @@ import {
   useOrchestrationGoal,
   useOrchestrationQueue,
   useOrchestrationStrategy,
+  useExecuteOrchestration,
 } from '@/api/modules';
 import './index.css';
 
@@ -85,6 +86,7 @@ export default function Orchestration() {
   const { data: agentsData } = useOrchestrationAgents();
   const { data: queueData } = useOrchestrationQueue();
   const { data: strategy } = useOrchestrationStrategy();
+  const executeOrchestration = useExecuteOrchestration();
 
   const initialNodes: any[] = useMemo(
     () =>
@@ -132,7 +134,7 @@ export default function Orchestration() {
         <div className="orch-header-right">
           <Button icon={<SaveOutlined />} onClick={() => message.success('已保存为模板（演示）')}>保存为模板</Button>
           <Button onClick={() => message.info('操作菜单（演示）')}>操作</Button>
-          <Button type="primary" icon={<ThunderboltOutlined />} onClick={() => message.loading('正在启动多智能体协同...', 1.2).then(() => message.success('已启动'))}>启动执行</Button>
+          <Button type="primary" loading={executeOrchestration.isPending} icon={<ThunderboltOutlined />} onClick={() => executeOrchestration.mutate({}, { onSuccess: () => message.success('编排已启动并写入审计日志'), onError: () => message.error('启动编排失败') })}>启动执行</Button>
         </div>
       </div>
 
@@ -163,7 +165,7 @@ export default function Orchestration() {
                   <span className="parsed-icon" />
                   <span className="parsed-label">约束条件</span>
                   <div className="parsed-val">
-                    {(goal?.parsedResult.constraints ?? []).map((c) => (
+                    {(goal?.parsedResult.constraints ?? []).map((c: string) => (
                       <div key={c}>· {c}</div>
                     ))}
                   </div>
@@ -184,7 +186,7 @@ export default function Orchestration() {
             <div className="goal-section">
               <div className="goal-label">上传文件 (2)</div>
               <div className="file-list">
-                {(goal?.uploadedFiles ?? []).map((f) => (
+                {(goal?.uploadedFiles ?? []).map((f: { name: string; size: string }) => (
                   <div key={f.name} className="file-row">
                     <FileTextOutlined style={{ color: '#22c55e' }} />
                     <div className="file-info">

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { App, Button, Input, Modal, Select, Skeleton, Tabs, Tag } from 'antd';
+import { App, Avatar, Button, Input, List, Modal, Select, Skeleton, Tabs, Tag } from 'antd';
 import { CloudUploadOutlined, DownloadOutlined, EyeOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons';
 import type { SceneTemplate } from '@ican/contracts';
 import {
@@ -224,37 +224,34 @@ export default function Resource() {
         </div>
 
         <div className="resource-aside">
-          <SectionCard title="推荐学习路径">
-            <div className="learning-list">
-              {learning.map((p) => (
-                <div key={p.index} className="learning-step">
-                  <div className="learning-index">{p.index}</div>
-                  <div className="learning-body">
-                    <div className="learning-title">{p.title}</div>
-                    <div className="learning-desc">{p.description}</div>
-                    <div className="learning-meta">
-                      <span>{p.duration}</span>
-                      <span>· {p.resourceCount} 个资源</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <a className="learning-more" onClick={() => message.info('展开完整学习路径（演示）')}>查看完整学习路径 →</a>
-          </SectionCard>
+            <SectionCard title="推荐学习路径">
+              <div className="learning-list">
+                {learning.length === 0 ? <div style={{ textAlign: 'center', padding: 24, color: '#94a3b8', fontSize: 13 }}>暂无学习路径</div> : learning.map((p, i) => (
+                  <List.Item key={`${p.index}-${p.title}-${i}`}>
+                    <List.Item.Meta
+                      avatar={<Avatar size="small" style={{ backgroundColor: '#2563eb' }}>{i + 1}</Avatar>}
+                      title={<span style={{ fontSize: 14 }}>{p.title}</span>}
+                      description={<span style={{ fontSize: 12 }}>{p.description}</span>}
+                    />
+                  </List.Item>
+                ))}
+              </div>
+            </SectionCard>
 
-          <SectionCard title="热门资源" extra={<a>更多</a>}>
-            <div className="hot-list">
-              {hot.map((r) => (
-                <div key={r.rank} className="hot-row">
-                  <span className={`hot-rank rank-${r.rank}`}>{r.rank}</span>
-                  <span className="hot-name">{r.name}</span>
-                  <span className="hot-dl num-font">⬇ {r.downloads}</span>
-                  <span className="hot-vw num-font">👁 {r.views}</span>
-                </div>
-              ))}
-            </div>
-          </SectionCard>
+            <SectionCard title="热门资源">
+              {hot.length === 0 ? <div style={{ textAlign: 'center', padding: 24, color: '#94a3b8', fontSize: 13 }}>暂无热门资源</div> : <List
+                dataSource={hot}
+                renderItem={(r, i) => (
+                  <List.Item>
+                    <List.Item.Meta
+                      avatar={<Tag color={i < 3 ? 'gold' : 'default'}>{r.rank || i + 1}</Tag>}
+                      title={<span style={{ fontSize: 13 }}>{r.name}</span>}
+                      description={<span style={{ fontSize: 12, color: '#94a3b8' }}>⬇ {r.downloads}  👁 {r.views}</span>}
+                    />
+                  </List.Item>
+                )}
+              />}
+            </SectionCard>
         </div>
       </div>
 

@@ -2,54 +2,42 @@
  * 任务编排 API
  */
 
-import { useQuery, type UseQueryResult } from '@tanstack/react-query';
+import { useMutation, useQuery, type UseMutationResult, type UseQueryResult } from '@tanstack/react-query';
 import { request } from '@/api/client';
-import { USE_MOCK } from '@/api/client';
 import { apiUrl } from '@/utils/apiUrl';
-import {
-  orchestrationAgents as mockAgents,
-  orchestrationTaskQueue as mockQueue,
-  orchestrationAbnormalBranches as mockBranches,
-  orchestrationStrategyParams as mockParams,
-  orchestrationTaskGoal as mockGoal,
-  orchestrationFlowNodes as mockFlowNodes,
-  orchestrationFlowEdges as mockFlowEdges,
-} from '@ican/mock-data';
 
 import type { Agent, Task } from '@ican/contracts';
 import type { AgentFlowEdge, AgentFlowNode } from '@/api/modules/orchestrationTypes';
 
-export type OrchestrationStrategyParams = typeof mockParams;
-export type OrchestrationTaskGoal = typeof mockGoal;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type OrchestrationStrategyParams = Record<string, any>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type OrchestrationTaskGoal = Record<string, any>;
 export type OrchestrationAbnormalBranch = { title: string };
 
 export async function getOrchestrationAgents(): Promise<Agent[]> {
-  if (USE_MOCK) return mockAgents;
   return request({ url: apiUrl('/orchestration/agents') });
 }
 export async function getOrchestrationQueue(): Promise<Task[]> {
-  if (USE_MOCK) return mockQueue;
   return request({ url: apiUrl('/orchestration/queue') });
 }
 export async function getOrchestrationFlowNodes(): Promise<AgentFlowNode[]> {
-  if (USE_MOCK) return mockFlowNodes;
   return request({ url: apiUrl('/orchestration/flow-nodes') });
 }
 export async function getOrchestrationFlowEdges(): Promise<AgentFlowEdge[]> {
-  if (USE_MOCK) return mockFlowEdges;
   return request({ url: apiUrl('/orchestration/flow-edges') });
 }
 export async function getOrchestrationStrategy(): Promise<OrchestrationStrategyParams> {
-  if (USE_MOCK) return mockParams;
   return request({ url: apiUrl('/orchestration/strategy') });
 }
 export async function getOrchestrationGoal(): Promise<OrchestrationTaskGoal> {
-  if (USE_MOCK) return mockGoal;
   return request({ url: apiUrl('/orchestration/goal') });
 }
 export async function getOrchestrationBranches(): Promise<OrchestrationAbnormalBranch[]> {
-  if (USE_MOCK) return mockBranches;
   return request({ url: apiUrl('/orchestration/branches') });
+}
+export async function executeOrchestration(payload: Record<string, unknown>): Promise<{ status: string; started_at: string }> {
+  return request({ url: apiUrl('/orchestration/execute'), method: 'POST', data: payload });
 }
 
 export function useOrchestrationAgents(): UseQueryResult<Agent[]> {
@@ -72,4 +60,7 @@ export function useOrchestrationGoal(): UseQueryResult<OrchestrationTaskGoal> {
 }
 export function useOrchestrationBranches(): UseQueryResult<OrchestrationAbnormalBranch[]> {
   return useQuery({ queryKey: ['orch', 'branches'], queryFn: getOrchestrationBranches });
+}
+export function useExecuteOrchestration(): UseMutationResult<{ status: string; started_at: string }, Error, Record<string, unknown>> {
+  return useMutation({ mutationFn: executeOrchestration });
 }

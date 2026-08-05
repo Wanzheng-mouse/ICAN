@@ -10,9 +10,8 @@ import {
   type UseMutationResult,
   type UseQueryResult,
 } from '@tanstack/react-query';
-import { request, USE_MOCK } from '@/api/client';
+import { request } from '@/api/client';
 import { apiUrl } from '@/utils/apiUrl';
-import { editorSceneComponents as mockComponents } from '@ican/mock-data';
 import { editorComponentsToScenarioUpdate } from '@/api/mappers/scenarioMapper';
 
 import type { SceneComponent } from '@ican/contracts';
@@ -21,7 +20,6 @@ import type {
   ScenarioCreate,
   ScenarioData,
   ScenarioRead,
-  ScenarioValidationIssue,
   ScenarioValidationRead,
   ScenarioVersionRead,
 } from '@/api/dtos/backend';
@@ -36,7 +34,7 @@ export class ScenarioValidationError extends Error {
 }
 
 export class ScenarioConflictError extends Error {
-  constructor() {
+  constructor(public readonly currentVersion?: number) {
     super('场景已被其他会话更新，请重新加载后再保存');
     this.name = 'ScenarioConflictError';
   }
@@ -46,83 +44,16 @@ function buildData(components: SceneComponent[], canvas: ScenarioData['canvas'] 
   return { components, canvas, schema_version: '1.0' };
 }
 
-function validateMockData(data: ScenarioData): ScenarioValidationRead {
-  const errors: ScenarioValidationIssue[] = [];
-  const seen = new Set<string>();
-
-  data.components.forEach((component, index) => {
-    if (seen.has(component.id)) {
-      errors.push({
-        code: 'DUPLICATE_COMPONENT_ID',
-        message: '组件 ID ' + component.id + ' 重复',
-        component_ids: [component.id],
-        field: 'components.id',
-      });
-    }
-    seen.add(component.id);
-
-    if (
-      component.x < 0
-      || component.y < 0
-      || component.x + component.width > data.canvas.width
-      || component.y + component.height > data.canvas.height
-    ) {
-      errors.push({
-        code: 'OUT_OF_BOUNDS',
-        message: '组件 ' + component.name + ' 超出画布边界',
-        component_ids: [component.id],
-        field: 'components.position',
-      });
-    }
-
-    data.components.slice(index + 1).forEach((other) => {
-      const overlaps = (
-        component.x < other.x + other.width
-        && component.x + component.width > other.x
-        && component.y < other.y + other.height
-        && component.y + component.height > other.y
-      );
-      if (overlaps) {
-        errors.push({
-          code: 'COMPONENT_OVERLAP',
-          message: '组件 ' + component.name + ' 与 ' + other.name + ' 发生重叠',
-          component_ids: [component.id, other.id],
-          field: 'components.position',
-        });
-      }
-    });
-  });
-
-  return {
-    valid: errors.length === 0,
-    errors,
-    warnings: data.components.length === 0
-      ? [{ code: 'EMPTY_SCENARIO', message: '场景中暂无组件', component_ids: [], field: 'components' }]
-      : [],
-  };
-}
-
 function getErrorStatus(error: unknown): number | undefined {
   return (error as { response?: { status?: number } })?.response?.status;
 }
 
 export async function getScenario(id: string): Promise<ScenarioRead> {
-  if (USE_MOCK) {
-    return {
-      id,
-      project_id: 'mock-project',
-      name: 'Mock warehouse',
-      data: buildData(mockComponents),
-      version: 1,
-      updated_at: new Date().toISOString(),
-    };
-  }
   return request({ url: apiUrl('/scenarios/' + id) });
 }
 
 export async function validateScenario(id: string, components: SceneComponent[], canvas: ScenarioData['canvas'] = DEFAULT_CANVAS): Promise<ScenarioValidationRead> {
   const data = buildData(components, canvas);
-  if (USE_MOCK) return validateMockData(data);
   return request({
     url: apiUrl('/scenarios/' + id + '/validate'),
     method: 'POST',
@@ -140,46 +71,19 @@ export async function saveScenario(
   if (!validation.valid) throw new ScenarioValidationError(validation);
 
   const payload = editorComponentsToScenarioUpdate(components, canvas, expectedVersion);
-  if (USE_MOCK) {
-    return {
-      id,
-      project_id: 'mock-project',
-      name: 'Mock warehouse',
-      data: payload.data,
-      version: (expectedVersion ?? 1) + 1,
-      updated_at: new Date().toISOString(),
-    };
-  }
-
   try {
     return await request({ url: apiUrl('/scenarios/' + id), method: 'PUT', data: payload });
   } catch (error: unknown) {
-    if (getErrorStatus(error) === 409) throw new ScenarioConflictError();
+    if (getErrorStatus(error) === 409) {
+      const currentVersion = Number((error as { response?: { data?: { current_version?: unknown } } })?.response?.data?.current_version);
+      throw new ScenarioConflictError(Number.isFinite(currentVersion) ? currentVersion : undefined);
+    }
     throw error;
   }
 }
 
 export async function autoLayoutScenario(id: string, components: SceneComponent[], canvas: ScenarioData['canvas'] = DEFAULT_CANVAS): Promise<ScenarioAutoLayoutRead> {
   const data = buildData(components, canvas);
-  if (USE_MOCK) {
-    let cursorX = 24;
-    let cursorY = 24;
-    let rowHeight = 0;
-    const laidOut = components.map((component) => {
-      if (cursorX + component.width > data.canvas.width - 24) {
-        cursorX = 24;
-        cursorY += rowHeight + 24;
-        rowHeight = 0;
-      }
-      const result = { ...component, x: cursorX, y: cursorY };
-      cursorX += component.width + 24;
-      rowHeight = Math.max(rowHeight, component.height);
-      return result;
-    });
-    const resultData = buildData(laidOut);
-    return { data: resultData, validation: validateMockData(resultData) };
-  }
-
   return request({
     url: apiUrl('/scenarios/' + id + '/auto-layout'),
     method: 'POST',
@@ -188,31 +92,10 @@ export async function autoLayoutScenario(id: string, components: SceneComponent[
 }
 
 export async function getScenarioVersions(id: string): Promise<ScenarioVersionRead[]> {
-  if (USE_MOCK) {
-    const scenario = await getScenario(id);
-    return [{
-      id: 'mock-version-1',
-      scenario_id: id,
-      version: scenario.version,
-      name: scenario.name,
-      data: scenario.data,
-      created_at: scenario.updated_at,
-    }];
-  }
   return request({ url: apiUrl('/scenarios/' + id + '/versions') });
 }
 
 export async function createScenario(params: ScenarioCreate): Promise<ScenarioRead> {
-  if (USE_MOCK) {
-    return {
-      id: 'scn-' + Date.now(),
-      project_id: params.project_id,
-      name: params.name,
-      data: params.data ?? buildData([]),
-      version: 1,
-      updated_at: new Date().toISOString(),
-    };
-  }
   return request({ url: apiUrl('/scenarios'), method: 'POST', data: params });
 }
 

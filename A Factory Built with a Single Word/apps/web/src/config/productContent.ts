@@ -34,8 +34,42 @@ export const generationPipeline: GenerationStep[] = [
 
 export const productFeatures: FeatureItem[] = [
   { iconColor: '#3b82f6', iconName: 'CommentOutlined', title: '自然语言驱动', description: '用自然语言描述需求，降低门槛，让方案生成更简单高效。' },
-  { iconColor: '#06b6d4', iconName: 'TeamOutlined', title: '多智能体协同', description: '支持多类型机器人与设备协同，呈现复杂作业环境。' },
-  { iconColor: '#8b5cf6', iconName: 'DatabaseOutlined', title: '可复现仿真', description: '基于固定随机种子和持久化离散事件快照，结果可复核。' },
-  { iconColor: '#22c55e', iconName: 'RiseOutlined', title: '多策略进化', description: '通过多随机种子候选仿真比较策略，持续优化关键指标。' },
+  { iconColor: '#06b6d4', iconName: 'TeamOutlined', title: '多智能体协同', description: '支持多类型机器人与设备协同，真实还原复杂作业环境。' },
+  { iconColor: '#8b5cf6', iconName: 'DatabaseOutlined', title: '高保真仿真', description: '物理级仿真引擎，高精度建模，结果更可信。' },
+  { iconColor: '#22c55e', iconName: 'RiseOutlined', title: '持续进化优化', description: '基于数据反馈与强化学习，自动迭代，持续提升绩效。' },
   { iconColor: '#10b981', iconName: 'LinkOutlined', title: '全链路闭环', description: '从需求到报告闭环交付，打通规划、验证与决策全流程。' },
+];
+
+/**
+ * 首页"热门场景模板" — 对齐 Front-images/image01：
+ * 电商中型仓 / 冷链多温区仓 / 3C高错订单元 / 医药仓仓位
+ * 每条对应 HomeHeroCover 配色（ecom / coldchain / 3c / medical）。
+ */
+export interface HomeTemplatePreset {
+  key: 'ecom' | 'coldchain' | '3c' | 'medical';
+  title: string;
+  description: string;
+}
+
+export const homeTemplatePresets: HomeTemplatePreset[] = [
+  {
+    key: 'ecom',
+    title: '电商中型仓',
+    description: '适用于日均订单 1-5 万单的电商中型仓库拣选场景。',
+  },
+  {
+    key: 'coldchain',
+    title: '冷链多温区仓',
+    description: '多温区管理，保障冷链作业效率与温控合规。',
+  },
+  {
+    key: '3c',
+    title: '3C高错订单元',
+    description: '高频订单波动场景，提升拣选与发运效率。',
+  },
+  {
+    key: 'medical',
+    title: '医药仓仓位',
+    description: '满足 GSP 合规要求的医药行业仓位仓配场景。',
+  },
 ];

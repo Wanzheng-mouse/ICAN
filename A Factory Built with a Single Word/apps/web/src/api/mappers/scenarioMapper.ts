@@ -52,3 +52,18 @@ export function editorComponentsToScenarioCreate(
     },
   };
 }
+
+/** 后端 ScenarioRead → 前端编辑器初始化状态 */
+export function scenarioReadToEditorState(read: ScenarioRead): {
+  components: SceneComponent[];
+  canvas: { width: number; height: number; scale: number };
+  name: string;
+  version: number;
+} {
+  return {
+    components: scenarioReadToComponents(read),
+    canvas: scenarioReadToCanvas(read),
+    name: read.name,
+    version: read.version,
+  };
+}
