@@ -17,12 +17,14 @@ import {
   WarningFilled,
   CheckCircleFilled,
   FileTextFilled,
+  FolderOutlined,
   InfoCircleFilled,
 } from '@ant-design/icons';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { TOP_MENUS } from '@/constants/menu';
 import { useAppStore } from '@/stores/useAppStore';
 import { filterNotifications, useNotificationStore } from '@/stores/useNotificationStore';
+import { useNotificationStream } from '@/api/modules/notificationApi';
 import { mockLogout } from '@/api/modules';
 import { searchIndex } from '@/stores/searchIndex';
 import './MainLayout.css';
@@ -31,6 +33,7 @@ const { Header, Content } = Layout;
 
 const iconMap: Record<string, React.ReactNode> = {
   home: <AppstoreOutlined />,
+  projects: <FolderOutlined />,
   simulation: <ThunderboltOutlined />,
   evolution: <LineChartOutlined />,
   report: <BarChartOutlined />,
@@ -63,6 +66,9 @@ export function MainLayout({ children, variant = 'default' }: MainLayoutProps) {
   const notifItems = useNotificationStore((s) => s.items);
   const markAllRead = useNotificationStore((s) => s.markAllRead);
   const markRead = useNotificationStore((s) => s.markRead);
+
+  // Establish real-time notification WebSocket connection
+  useNotificationStream();
 
   const suggestions = searchText ? searchIndex(searchText).slice(0, 5) : [];
   const visibleNotifications = filterNotifications(notifItems, user?.preferences);
@@ -186,9 +192,6 @@ export function MainLayout({ children, variant = 'default' }: MainLayoutProps) {
               onClick={() => setNotifOpen(true)}
             />
           </Badge>
-          <Button className="ican-project-btn" onClick={() => navigate('/simulation')}>
-            项目中心 <CaretDownOutlined />
-          </Button>
           <Dropdown menu={{ items: userMenu }} placement="bottomRight">
             <div className="ican-user">
               <img src={user?.avatar} alt={user?.name ?? ''} className="avatar" />
