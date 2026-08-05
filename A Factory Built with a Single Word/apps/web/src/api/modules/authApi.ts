@@ -1,142 +1,201 @@
 /**
- * 认证 API（Mock 模式）
+ * 认证 / 账户 API —— 真实后端实现
  *
- * 登录方式支持：
- * - loginName: 'admin' / 'zss' / 'lisi'
- * - name: 'Wanzheng' / 'ZhangSan' / 'LiSi'
- * - email: 'admin@ican-platform.com' / ...
+ * 之前由 mockLogin / mockRegister / mockLogout / mockChangePassword /
+ * mockUpdateProfile 提供的能力，现统一调用后端：
+ *   - POST /api/v1/auth/login
+ *   - POST /api/v1/auth/register
+ *   - POST /api/v1/auth/logout
+ *   - PUT  /api/v1/users/me           (更新资料)
+ *   - POST /api/v1/auth/change-password
+ *
+ * DEMO_ACCOUNT_HINT 保留为登录页"演示账号"按钮的快捷填充值，
+ * 实际账号需要在后端 seed 数据中存在。
  */
 
-import type { UserInfo } from '@/stores/useAppStore';
+import { useMutation, useQuery, type UseMutationResult, type UseQueryResult } from '@tanstack/react-query';
+import { request } from '@/api/client';
+import { apiUrl } from '@/utils/apiUrl';
 
-const DEFAULT_AVATAR = 'https://api.dicebear.com/7.x/avataaars/svg?seed=';
+// ============================================================
+// 类型
+// ============================================================
 
-const DEMO_USERS: Array<UserInfo & { password: string; loginName: string }> = [
-  { id: 'u-001', loginName: 'admin', name: 'Wanzheng', email: 'admin@ican-platform.com', department: '技术部', role: 'admin', avatar: `${DEFAULT_AVATAR}Wanzheng`, password: 'ican2026' },
-  { id: 'u-002', loginName: 'zss', name: 'ZhangSan', email: 'operator@ican-platform.com', department: '运营部', role: 'operator', avatar: `${DEFAULT_AVATAR}ZhangSan`, password: 'ican2026' },
-  { id: 'u-003', loginName: 'lisi', name: 'LiSi', email: 'viewer@ican-platform.com', department: '质量部', role: 'viewer', avatar: `${DEFAULT_AVATAR}LiSi`, password: 'ican2026' },
-];
+export interface UserInfoRead {
+  id: string;
+  name: string;
+  email: string;
+  department: string;
+  role: 'admin' | 'operator' | 'viewer';
+  avatar: string;
+  preferences?: {
+    theme: 'light' | 'dark' | 'system';
+    defaultPage: string;
+    demoMode: boolean;
+    notifyAlert: boolean;
+    notifyTask: boolean;
+    notifyReport: boolean;
+    notifySystem: boolean;
+  };
+}
 
-export interface LoginRequest {
+export interface AuthRead {
+  token: string;
+  user: UserInfoRead;
+}
+
+export interface LoginPayload {
   username: string;
   password: string;
   remember?: boolean;
 }
 
-export interface LoginResponse {
-  token: string;
-  user: UserInfo;
-}
-
-export interface RegisterRequest {
+export interface RegisterPayload {
   loginName: string;
   name: string;
   email: string;
+  department?: string;
   password: string;
 }
 
-const REGISTERED_USERS_KEY = 'ican-demo-registered-users';
-
-function readRegisteredUsers(): Array<UserInfo & { password: string; loginName: string }> {
-  try {
-    const saved = localStorage.getItem(REGISTERED_USERS_KEY);
-    return saved ? JSON.parse(saved) : [];
-  } catch {
-    return [];
-  }
+export interface ChangePasswordPayload {
+  old_password: string;
+  new_password: string;
 }
 
-function saveRegisteredUsers() {
-  const registered = userDB.filter((user) => !DEMO_USERS.some((demo) => demo.id === user.id));
-  localStorage.setItem(REGISTERED_USERS_KEY, JSON.stringify(registered));
+export interface UpdateProfilePayload {
+  name?: string;
+  avatar?: string;
+  department?: string;
 }
 
-let userDB = [...DEMO_USERS, ...readRegisteredUsers()];
+// ============================================================
+// 常量
+// ============================================================
 
-export function resetUserDB() {
-  userDB = [...DEMO_USERS];
-}
+/**
+ * 登录页"演示账号"按钮填充值。
+ * 实际登录是否成功取决于后端 seed 数据是否存在该账号。
+ */
+export const DEMO_ACCOUNT_HINT = {
+  username: 'admin',
+  password: 'ican2026',
+};
 
-export function mockLogin(req: LoginRequest): Promise<LoginResponse> {
-  return new Promise((resolve, reject) => {
-    setTimeout(() => {
-      const found = userDB.find(
-        (u) => (u.loginName === req.username || u.name === req.username || u.email === req.username)
-          && u.password === req.password,
-      );
-      if (found) {
-        resolve({
-          token: `mock-jwt-${found.id}-${Date.now()}`,
-          user: { id: found.id, name: found.name, email: found.email, department: found.department, role: found.role, avatar: found.avatar },
-        });
-      } else {
-        reject(new Error('账号或密码错误'));
-      }
-    }, 600);
+// ============================================================
+// 通用请求
+// ============================================================
+
+export async function login(payload: LoginPayload): Promise<AuthRead> {
+  return request<AuthRead>({
+    url: apiUrl('/auth/login'),
+    method: 'POST',
+    data: {
+      username: payload.username,
+      password: payload.password,
+      remember: payload.remember ?? false,
+    },
   });
 }
 
-/** 本地演示注册：真实项目中应由后端完成密码加密、账户校验与令牌签发。 */
-export function mockRegister(req: RegisterRequest): Promise<LoginResponse> {
-  return new Promise((resolve, reject) => {
-    setTimeout(() => {
-      const loginName = req.loginName.trim();
-      const name = req.name.trim();
-      const email = req.email.trim().toLowerCase();
-      if (!/^[a-zA-Z][a-zA-Z0-9_]{2,19}$/.test(loginName)) {
-        reject(new Error('账号需以字母开头，包含 3–20 位字母、数字或下划线'));
-        return;
-      }
-      if (userDB.some((user) => user.loginName === loginName || user.email.toLowerCase() === email)) {
-        reject(new Error('该账号或邮箱已被注册'));
-        return;
-      }
-      const user = {
-        id: `u-local-${Date.now()}`,
-        loginName,
-        name,
-        email,
-        password: req.password,
-        department: '未设置',
-        role: 'operator' as const,
-        avatar: `${DEFAULT_AVATAR}${encodeURIComponent(name)}`,
-      };
-      userDB = [...userDB, user];
-      saveRegisteredUsers();
-      resolve({
-        token: `mock-jwt-${user.id}-${Date.now()}`,
-        user: { id: user.id, name: user.name, email: user.email, department: user.department, role: user.role, avatar: user.avatar },
-      });
-    }, 500);
+export async function register(payload: RegisterPayload): Promise<AuthRead> {
+  return request<AuthRead>({
+    url: apiUrl('/auth/register'),
+    method: 'POST',
+    data: {
+      loginName: payload.loginName,
+      name: payload.name,
+      email: payload.email,
+      department: payload.department ?? '未设置',
+      password: payload.password,
+      remember: true,
+    },
   });
 }
 
-export function mockLogout(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 200));
-}
-
-export function mockUpdateProfile(userId: string, updates: Partial<UserInfo>): Promise<UserInfo> {
-  return new Promise((resolve, reject) => {
-    setTimeout(() => {
-      const idx = userDB.findIndex((u) => u.id === userId);
-      if (idx < 0) return reject(new Error('用户不存在'));
-      userDB[idx] = { ...userDB[idx], ...updates } as typeof userDB[0];
-      const { password: _p, loginName: _n, ...safe } = userDB[idx];
-      resolve(safe);
-    }, 400);
+export async function logout(): Promise<void> {
+  await request({
+    url: apiUrl('/auth/logout'),
+    method: 'POST',
   });
 }
 
-export function mockChangePassword(userId: string, oldPwd: string, newPwd: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    setTimeout(() => {
-      const user = userDB.find((u) => u.id === userId);
-      if (!user) return reject(new Error('用户不存在'));
-      if (user.password !== oldPwd) return reject(new Error('原密码错误'));
-      user.password = newPwd;
-      resolve();
-    }, 400);
+export async function changePassword(payload: ChangePasswordPayload): Promise<void> {
+  await request({
+    url: apiUrl('/auth/change-password'),
+    method: 'POST',
+    data: {
+      old_password: payload.old_password,
+      new_password: payload.new_password,
+    },
   });
 }
 
-export const DEMO_ACCOUNT_HINT = { username: 'admin', password: 'ican2026' };
+export async function getMyProfile(): Promise<UserInfoRead> {
+  return request<UserInfoRead>({ url: apiUrl('/users/me') });
+}
+
+export async function updateMyProfile(payload: UpdateProfilePayload): Promise<UserInfoRead> {
+  return request<UserInfoRead>({
+    url: apiUrl('/users/me'),
+    method: 'PUT',
+    data: payload,
+  });
+}
+
+// ============================================================
+// React Query Hooks
+// ============================================================
+
+export function useMyProfile(): UseQueryResult<UserInfoRead> {
+  return useQuery({
+    queryKey: ['auth', 'me'],
+    queryFn: getMyProfile,
+    staleTime: 60_000,
+  });
+}
+
+export function useLogin(): UseMutationResult<AuthRead, Error, LoginPayload> {
+  return useMutation({ mutationFn: login });
+}
+
+export function useRegister(): UseMutationResult<AuthRead, Error, RegisterPayload> {
+  return useMutation({ mutationFn: register });
+}
+
+export function useLogout(): UseMutationResult<void, Error, void> {
+  return useMutation({ mutationFn: logout });
+}
+
+export function useChangePassword(): UseMutationResult<void, Error, ChangePasswordPayload> {
+  return useMutation({ mutationFn: changePassword });
+}
+
+export function useUpdateProfile(): UseMutationResult<UserInfoRead, Error, UpdateProfilePayload> {
+  return useMutation({ mutationFn: updateMyProfile });
+}
+
+// ============================================================
+// 兼容旧调用 —— 让 Login/Register/Settings/Profile/MainLayout
+// 这些页面继续使用 mockLogin / mockRegister / mockLogout /
+// mockChangePassword / mockUpdateProfile 的旧名。
+// 语义：旧名直接调用对应真实实现。
+// ============================================================
+
+/** 兼容旧名：mockLogin —— 调用真实登录接口 */
+export const mockLogin = login;
+/** 兼容旧名：mockRegister —— 调用真实注册接口 */
+export const mockRegister = register;
+/** 兼容旧名：mockLogout —— 调用真实登出接口 */
+export const mockLogout = logout;
+/** 兼容旧名：mockChangePassword —— 参数顺序 (userId, oldPwd, newPwd) 兼容旧调用 */
+export async function mockChangePassword(_userId: string, oldPassword: string, newPassword: string): Promise<void> {
+  return changePassword({ old_password: oldPassword, new_password: newPassword });
+}
+/** 兼容旧名：mockUpdateProfile —— 参数顺序 (userId, {name, avatar}) 兼容旧调用 */
+export async function mockUpdateProfile(
+  _userId: string,
+  payload: { name?: string; avatar?: string; department?: string },
+): Promise<UserInfoRead> {
+  return updateMyProfile(payload);
+}

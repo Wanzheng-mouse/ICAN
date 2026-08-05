@@ -32,6 +32,15 @@ class Settings(BaseSettings):
     # This timeout applies only to the outbound Agnes analysis request.
     agnes_request_timeout_seconds: int = 5 * 60
     llm_max_tokens: int = 8192
+    # ---- Seed user credentials (development/demo only) ----
+    # Override via environment variables; production deployments should leave
+    # these unset so seed_users() creates no fallback accounts and forces
+    # every operator to register through the normal flow.
+    seed_admin_password: str = "ChangeMe-OnFirstLogin!"
+    seed_demo_password: str = "ChangeMe-OnFirstLogin!"
+    seed_admin_login: str = "admin"
+    seed_demo_login: str = "lisi"
+    seed_enabled: bool = True
     model_config = SettingsConfigDict(env_file=".env", env_prefix="ICAN_", extra="ignore")
 
     @property
@@ -39,7 +48,7 @@ class Settings(BaseSettings):
         return [value.strip() for value in self.cors_origins.split(",") if value.strip()]
 
     @model_validator(mode="after")
-    def protect_reset_tokens(self) -> "Settings":
+    def protect_reset_tokens(self) -> Settings:
         if self.environment.lower() == "production" and self.expose_reset_token:
             raise ValueError("ICAN_EXPOSE_RESET_TOKEN must be false in production")
         return self

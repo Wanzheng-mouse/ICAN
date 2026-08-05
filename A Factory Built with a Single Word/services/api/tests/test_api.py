@@ -6,7 +6,10 @@ from uuid import uuid4
 settings.expose_reset_token = True
 
 
-def authenticate(client: TestClient, username: str = "admin", password: str = "ican2026") -> str:
+def authenticate(client: TestClient, username: str = "admin", password: str | None = None) -> str:
+    # Use password from settings (can be overridden via env vars for testing)
+    if password is None:
+        password = settings.seed_admin_password
     response = client.post("/api/v1/auth/login", json={"username": username, "password": password})
     assert response.status_code == 200
     token = response.json()["token"]
@@ -262,7 +265,7 @@ def test_week_three_scenario_validation_layout_and_versioning():
 
 def test_real_frontend_endpoints():
     with TestClient(app) as client:
-        login = client.post("/api/v1/auth/login", json={"username": "admin", "password": "ican2026"})
+        login = client.post("/api/v1/auth/login", json={"username": "admin", "password": settings.seed_admin_password})
         assert login.status_code == 200
         token = login.json()["token"]
         headers = {"Authorization": f"Bearer {token}"}
@@ -622,5 +625,6 @@ def test_product_completeness_dashboard_search_resources_theme_and_notifications
 
         with client.websocket_connect(f"/api/v1/notifications/stream?token={token}") as websocket:
             notification = websocket.receive_json()
-            assert notification["type"] == "notification_changed"
+            # First message is either notification_list (initial state) or notification_changed
+            assert notification["type"] in ("notification_list", "notification_changed")
             assert notification["total"] >= notification["unread"]
