@@ -1,77 +1,55 @@
-# 数据闭环修复完成报告
+# 侧边栏精简 + 数字孪生 / 子页面差异化
 
-## 问题诊断
+## 一、移除侧边栏快捷操作（已完成）
 
-"需求生成 → 场景保存 → 仿真运行" 没有形成同一个数据闭环，存在 5 个断点：
+**文件**：`apps/web/src/layouts/ConsoleLayout.tsx` + `ConsoleLayout.css`
 
-1. **Home/index.tsx**: `handleGenerate` 创建空场景 `components: []`
-2. **Home/index.tsx**: `handleUseExample` 只随机填入文本，无示例场景
-3. **Editor/index.tsx**: `enterSimulation` 硬编码 `robot_count: 10`，忽略场景内容
-4. **后端 simulation.py**: `create_simulation` 只校验 scenario_id 存在，不读取场景内容
-5. **Simulation/index.tsx**: 3D 页面总是调用 `createWarehouseConfig()` 固定工厂
+删除了侧边栏中「快捷操作」区块（新建场景 / 启动仿真 / 重置仿真 / 导出报告 四个按钮），以及对应的
+`handleQuickStart` / `handleQuickStop` / `quickStartTooltip` 控制逻辑、死代码导航函数
+（`goToEditor` / `goToSimulation` / `goToReport`）和相关 import（`Tooltip`、`useControlSimulation`、
+`CaretRightOutlined`、`DownloadOutlined`、`PauseOutlined`、`PlusOutlined`、`ReloadOutlined` 及 3 个原本
+就未使用的图标）。同步清理了对应 CSS 与 `@keyframes shimmer`。
 
-## 修复内容
+**侧边栏现在只保留 4 个职责**：
+1. 项目上下文（轻量定位）
+2. 实时概览摘要（AGV 总数/活跃、任务数/完成、未读告警）
+3. 主导航菜单（分组）
+4. 底部连接状态
 
-### 1. 桥接函数 — scenarioMapper.ts (Task #6)
-- 新建 `apps/web/src/components/SimView3D/scenarioMapper.ts`
-- `scenarioToWarehouseConfig(data)` 将 2D 编辑器场景转换为 3D 仓库布局
-- 空场景降级到固定工厂，标记 `fallback: true`
-- 映射规则: shelf→ShelfZone, agv→AGV位置, station→工位区, charger→充电区
+仿真控制仍在「数字孪生」主区的控制条与子页面头部分别提供，入口不丢失。
 
-### 2. 后端仿真服务 — simulation.py + schemas.py + main.py (Task #7)
-- `SimulationCreate.robot_count` 改为 `int | None`（可从场景推导）
-- 新增 `scenario_version` 字段
-- `SimulationService.create()` 接收场景数据和版本，从 AGV 组件推导数量和位置
-- `_initial_runtime()` 支持从场景提取 AGV 坐标
-- `run.config` 存储 `scenario_snapshot`、`scenario_version`、`scenario_hash`、`fallback` 标志
-- `create_simulation` 端点传递 `scenario.data` 和版本号给引擎
+---
 
-### 3. 仿真页面 — Simulation/index.tsx (Task #8)
-- 从 `detailQuery.data?.config?.scenario_snapshot` 读取场景快照
-- 通过 `scenarioToWarehouseConfig()` 转换为 3D 布局
-- 有真实组件时显示绿色 "场景已加载" 横幅（含设备统计）
-- 降级时显示蓝色提示横幅
+## 二、数字孪生 vs 子页面差异化（已完成）
 
-### 4. 编辑器 — Editor/index.tsx (Task #9)
-- `enterSimulation()` 从 `components.filter(c => c.type === 'agv')` 推导 AGV 数量
-- 空场景/无 AGV 场景被拦截
-- 不再硬编码 `robot_count: 10`，由后端从场景快照推导
-- 发送 `scenario_version` 跟踪版本
+所有侧边栏子导航路由（`/simulation/tasks`、`/devices`、`/orders`、`/agents`、`/alerts`、
+`/dashboard`、`/settings`）均渲染 `<RuntimeSubView>`，布局本就是**表格 / 列表 / 卡片 / 图表**，
+与数字孪生主区的「3D 驾驶舱（实时 KPI + 三维视图 + AGV 卡片 + 事件流）」天然不同维度，不存在原样复制。
 
-### 5. 首页生成 — Home/index.tsx + generateComponents.ts (Task #10)
-- 新建 `apps/web/src/utils/generateComponents.ts`
-  - `parseRequirementForDevices()`: 关键词解析设备数量
-  - `generateComponents()`: 生成带合理坐标的 SceneComponent[]
-  - `INDUSTRY_EXAMPLES`: 4 个行业示例（电商/冷链/3C/医药）
-- `handleGenerate()` 现在生成真实组件（不再 `components: []`）
-- `handleUseExample` 改为弹出行业示例选择 Modal
+**重点修复了「数据看板」曾经的复制问题**：
+原实现直接用 3 个与驾驶舱重合的 KPI 卡（完成率 / 利用率 / 拥堵）。现重写为真正的**诊断拆解视图**：
 
-## 数据闭环路径
+| 卡片 | 内容 | 与驾驶舱的差异 |
+|---|---|---|
+| 任务生命周期分布 | completed / running / pending 分段条 | 驾驶舱只有汇总完成率，这里看任务结构占比 |
+| 运行效率诊断 | 完成率 / 平均等待 / 平均处理 / 利用率，带阈值变色 | 驾驶舱看实时数值，这里看健康度阈值 |
+| 设备效能排行 | 按已完成单数排序 + 排队(wait_ticks)诊断 + 电量条 | 驾驶舱看单台状态，这里做横向效能对比 |
+| 异常与拥堵聚焦 | 告警事件列表 + 拥堵计数 | 驾驶舱看全量事件流，这里只聚焦异常 |
 
-```
-用户输入需求 →(关键词解析)→ SceneComponent[] →(createScenario)→ 数据库场景
-→(createSimulation + scenario_snapshot)→ run.config
-→(scenarioToWarehouseConfig)→ WarehouseConfig → 3D 渲染
-```
+每个子页面的功能定位清晰：任务管理=队列表格、设备管理=车队/工作站/充电桩、订单管理=货物流转、
+智能体=协同负载、告警中心=异常、数据看板=效率诊断、运行设置=配置查看——互不重复。
 
-## 验证结果
+---
 
-| 门禁 | 状态 |
-|------|------|
-| 后端 pytest | 17/17 通过 |
-| 前端 TypeScript | 0 错误 |
-| 前端生产构建 | 38.52s 成功 |
+## 三、验证
 
-## 修改文件清单
+- `npx tsc --noEmit`：99 错误，与改动前持平，**0 新增**（仅剩 1 处历史遗留断导入 `SimulationTickRead`，
+  属本次任务范围外，见下）
+- `npx vite build`：✓ 12.18s 成功，全部模块转换通过
 
-| 文件 | 变更类型 |
-|------|---------|
-| `apps/web/src/components/SimView3D/scenarioMapper.ts` | 新建 |
-| `apps/web/src/utils/generateComponents.ts` | 新建 |
-| `apps/web/src/pages/Home/index.tsx` | 修改 |
-| `apps/web/src/pages/Editor/index.tsx` | 修改 |
-| `apps/web/src/pages/Simulation/index.tsx` | 修改 |
-| `apps/web/src/api/dtos/backend.ts` | 修改 |
-| `services/api/app/services/simulation.py` | 修改 |
-| `services/api/app/schemas.py` | 修改 |
-| `services/api/app/main.py` | 修改 |
+## 四、遗留跟进（建议，非本次范围）
+
+`@/api/dtos/backend.ts` 中已无 `SimulationTickRead` 类型（疑似早期重构遗留），但 `useSimulationStream.ts`
+与 `RuntimeSubView.tsx` 仍 import 它，导致 `backendTick` 在前端退化为 `any`、Simulation 页面约 25 处
+implicit-any。建议后续单独补回该接口（对齐后端 `snapshot_from_run` 输出：
+`task_items` / `tasks:{total,completed}` / `robots` / `metrics` / `events` / `generated_at`），可一次性消除这批类型告警。
