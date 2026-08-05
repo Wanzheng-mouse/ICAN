@@ -119,6 +119,13 @@ uploads/
 .agnes/
 .workbuddy/
 
+# Parent directory artifacts and reports (never commit)
+../*.md
+../.agnes/
+../.pcbin/
+../.workbuddy/
+../~/
+
 # ------------------------------------------------------------
 # Test artifacts (M8, 2026-07-26)
 # Throwaway test databases and coverage output must never be committed.
