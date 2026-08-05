@@ -5,13 +5,14 @@ import heapq
 import json
 import math
 import random
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from statistics import mean
 from typing import Any
 
 from app.models import Evolution, SimulationRun
-
 
 STATIONS = {
     "inbound": {"x": 150.0, "y": 500.0},
@@ -23,10 +24,57 @@ STATIONS = {
 }
 
 STRATEGIES: dict[str, dict[str, float]] = {
-    "balanced": {"speed": 1.55, "distance_weight": 1.0, "battery_weight": 2.0, "charge_threshold": 18},
-    "throughput": {"speed": 1.85, "distance_weight": 1.3, "battery_weight": 0.8, "charge_threshold": 14},
-    "energy_saver": {"speed": 1.3, "distance_weight": 1.5, "battery_weight": 2.5, "charge_threshold": 24},
-    "congestion_aware": {"speed": 1.45, "distance_weight": 0.9, "battery_weight": 1.8, "charge_threshold": 20},
+    "balanced": {
+        "speed": 1.55,
+        "distance_weight": 1.0,
+        "battery_weight": 2.0,
+        "charge_threshold": 18,
+    },
+    "throughput": {
+        "speed": 1.85,
+        "distance_weight": 1.3,
+        "battery_weight": 0.8,
+        "charge_threshold": 14,
+    },
+    "energy_saver": {
+        "speed": 1.3,
+        "distance_weight": 1.5,
+        "battery_weight": 2.5,
+        "charge_threshold": 24,
+    },
+    "congestion_aware": {
+        "speed": 1.45,
+        "distance_weight": 0.9,
+        "battery_weight": 1.8,
+        "charge_threshold": 20,
+    },
+}
+
+# Per-AGV path-planning strategies.  Each strategy produces a different
+# trade-off between the three forces that matter in a warehouse: shortest
+# distance, lane congestion avoidance, and dynamic re-routing around
+# obstacles.  Rotated by AGV index so a fleet looks like a fleet, not a
+# conga line, on the 3D scene.
+_PATH_STRATEGIES: tuple[str, ...] = (
+    "shortest",
+    "balanced",
+    "congestion_aware",
+    "priority_lane",
+    "detour",
+)
+_PATH_STRATEGY_LANE_BIAS: dict[str, int] = {
+    "shortest": 0,
+    "balanced": 1,
+    "congestion_aware": 2,
+    "priority_lane": 0,
+    "detour": 2,
+}
+_PATH_STRATEGY_SLOWDOWN: dict[str, float] = {
+    "shortest": 1.0,
+    "balanced": 0.96,
+    "congestion_aware": 0.9,
+    "priority_lane": 0.94,
+    "detour": 0.85,
 }
 
 
@@ -34,14 +82,58 @@ def _distance(a: dict[str, float], b: dict[str, float]) -> float:
     return math.hypot(a["x"] - b["x"], a["y"] - b["y"])
 
 
+def _berth_point(end: dict[str, float], lane: int, use_berth: bool) -> dict[str, float]:
+    """Unique station berth for a robot's directed lane.
+
+    Several AGVs may queue at the same station simultaneously.  A single
+    ``lane % 3`` x-offset collapses every third robot onto the same pose
+    (the 3D view showed stacked AGVs).  The berth grid below spreads up to
+    eight queued robots onto distinct points (4 columns x 2 rows) with at
+    least ~42 scene units between neighbours, while the A* path still plans
+    to the exact berth so no post-planning offset crosses a wall or shelf.
+    """
+    if not use_berth:
+        return {"x": float(end["x"]), "y": float(end["y"])}
+    berth = lane % 8
+    return {
+        "x": float(end["x"]) + ((berth % 4) - 1.5) * 42.0,
+        "y": float(end["y"]) + (berth // 4) * 60.0,
+    }
+
+
 def _route(
-    start: dict[str, float], end: dict[str, float], lane: int,
-    stations: dict[str, dict[str, float]], use_berth: bool = True,
+    start: dict[str, float],
+    end: dict[str, float],
+    lane: int,
+    stations: dict[str, dict[str, float]],
+    use_berth: bool = True,
     navigation: dict[str, Any] | None = None,
+    path_strategy: str = "balanced",
+    detour_offset: float = 0.0,
 ) -> list[dict[str, float]]:
-    """Build an obstacle-aware route, falling back to separated Manhattan lanes."""
+    """Build an obstacle-aware route, falling back to separated Manhattan lanes.
+
+    Each AGV's ``path_strategy`` controls how aggressively the route detours
+    around congested lanes and obstacle envelopes:
+
+    * ``shortest`` — picks the lowest-cost A* path; lane bias is zero.
+    * ``balanced`` — mixes A* with the lane bands, lane bias 1.
+    * ``congestion_aware`` — detours around any cell flagged as reserved
+      in the last few ticks, lane bias 2.
+    * ``priority_lane`` — reuses the dedicated high-priority corridor.
+    * ``detour`` — explicitly takes the longest-viable alternative lane
+      (used to decongest a hot route).
+
+    ``detour_offset`` is added to the lane y-coordinate so that two AGVs
+    in the same strategy still produce visually distinct paths.
+    """
     if navigation:
-        planned = _astar_route(start, end, navigation)
+        # Keep route separation inside A*: a post-planning visual offset can
+        # push a valid path through a shelf or a wall.
+        berth_destination = _berth_point(end, lane, use_berth)
+        planned = _astar_route(
+            start, berth_destination, navigation, lane=lane, path_strategy=path_strategy
+        )
         if planned:
             return planned
     # Keep navigation lanes inside the actual service corridor immediately
@@ -54,11 +146,10 @@ def _route(
     # Six explicitly separated lanes: 0-2 are pickup/return lanes and 3-5
     # are loaded delivery lanes.  Opposing AGVs therefore never share a
     # centreline, rather than relying on a last-moment collision stop.
-    lane_y = max(60.0, service_y - 180.0) + (lane % 6) * 38.0
+    lane_band = (lane + _PATH_STRATEGY_LANE_BIAS.get(path_strategy, 1)) % 6
+    lane_y = max(60.0, service_y - 180.0) + lane_band * 38.0 + detour_offset
     origin = {"x": float(start["x"]), "y": float(start["y"])}
-    # Each directed lane has its own berth at a shared station.  This prevents
-    # several completed routes from collapsing onto precisely the same pose.
-    destination = {"x": float(end["x"]) + (((lane % 3) - 1) * 24.0 if use_berth else 0.0), "y": float(end["y"])}
+    destination = _berth_point(end, lane, use_berth)
     # Stations use a lateral exit segment. Incoming robots queue on the vertical
     # approach, while the active robot can leave without meeting them head-on.
     at_station = any(_distance(origin, station) < 1.0 for station in stations.values())
@@ -85,8 +176,20 @@ def _route(
     return result
 
 
-def _astar_route(start: dict[str, float], end: dict[str, float], navigation: dict[str, Any]) -> list[dict[str, float]]:
+def _astar_route(
+    start: dict[str, float],
+    end: dict[str, float],
+    navigation: dict[str, Any],
+    lane: int = 0,
+    path_strategy: str = "balanced",
+    detour_offset: float = 0.0,
+) -> list[dict[str, float]]:
     """Plan a collision-free grid path around scene components.
+
+    The search honours a per-AGV ``path_strategy`` that influences how the
+    algorithm weights congestion versus straight-line distance.  ``detour``
+    strategies deliberately add a small lateral wobble so two AGVs in the
+    same strategy still trace visibly different polylines in the 3D scene.
 
     Start and destination cells remain traversable so AGVs can leave parking
     bays and enter workstations.  Shelf/obstacle rectangles are expanded by
@@ -104,18 +207,108 @@ def _astar_route(start: dict[str, float], end: dict[str, float], navigation: dic
             max(0, min(rows - 1, round(float(point["y"]) / step))),
         )
 
-    origin, target = cell(start), cell(end)
     obstacles = navigation.get("obstacles", [])
+    congestion = {cell(c) for c in navigation.get("congestion_cells", []) if isinstance(c, dict)}
+    reservations = {cell(c) for c in navigation.get("reservation_cells", []) if isinstance(c, dict)}
+
+    # Grid cells for the requested endpoints.  Start and destination remain
+    # traversable so AGVs can leave parking bays and enter workstations.
+    origin_cell, target_cell = cell(start), cell(end)
+
+    def obs_blocks(node: tuple[int, int]) -> bool:
+        """Obstacle envelope test with no start/target exemption — used to
+        decide whether a cell is genuinely drivable."""
+        x, y = node[0] * step, node[1] * step
+        for item in obstacles:
+            ix = float(item.get("x", 0))
+            iy = float(item.get("y", 0))
+            iw = float(item.get("w", 0))
+            ih = float(item.get("h", 0))
+            if (ix - clearance) <= x <= (ix + iw + clearance) and (iy - clearance) <= y <= (
+                iy + ih + clearance
+            ):
+                return True
+        return False
 
     def blocked(node: tuple[int, int]) -> bool:
-        if node in {origin, target}:
+        if node in {origin_cell, target_cell}:
             return False
-        x, y = node[0] * step, node[1] * step
-        return any(
-            float(item.get("x", 0)) - clearance <= x <= float(item.get("x", 0)) + float(item.get("w", 0)) + clearance
-            and float(item.get("y", 0)) - clearance <= y <= float(item.get("y", 0)) + float(item.get("h", 0)) + clearance
-            for item in obstacles
+        return obs_blocks(node)
+
+    def enclosed(node: tuple[int, int]) -> bool:
+        """A cell the AGV can never enter: blocked itself, or ringed by blocked
+        cells so no orthogonal neighbour offers an approach."""
+        if obs_blocks(node):
+            return True
+        return all(
+            obs_blocks((node[0] + dx, node[1] + dy))
+            for dx, dy in ((1, 0), (0, 1), (-1, 0), (0, -1))
         )
+
+    def nearest_free(center: tuple[int, int]) -> tuple[int, int]:
+        """BFS outward to the closest genuinely traversable cell (the aisle
+        berth the AGV can actually drive up to).  Keeps routes honest instead
+        of silently falling back to a straight line through equipment."""
+        if not obs_blocks(center):
+            return center
+        seen: set[tuple[int, int]] = {center}
+        queue: deque[tuple[int, int]] = deque([center])
+        while queue:
+            cur = queue.popleft()
+            if not obs_blocks(cur):
+                return cur
+            for dx, dy in ((1, 0), (0, 1), (-1, 0), (0, -1)):
+                nxt = (cur[0] + dx, cur[1] + dy)
+                if 0 <= nxt[0] < cols and 0 <= nxt[1] < rows and nxt not in seen:
+                    seen.add(nxt)
+                    queue.append(nxt)
+        return center
+
+    # A station centre (the usual endpoint) sits inside its own expanded
+    # obstacle envelope; if that cell — and every neighbour — is blocked the
+    # AGV could never reach it, so snap to the adjacent free aisle cell.  The
+    # final berth segment from that cell into the station is appended below.
+    if enclosed(origin_cell):
+        origin_cell = nearest_free(origin_cell)
+    if enclosed(target_cell):
+        target_cell = nearest_free(target_cell)
+
+    origin, target = origin_cell, target_cell
+
+    # Different strategies re-weight the cost of stepping into a congested
+    # cell.  ``shortest`` ignores congestion entirely; ``congestion_aware``
+    # penalises it heavily so the path bends around traffic.
+    congestion_penalty = {
+        "shortest": 0.4,
+        "balanced": 2.0,
+        "congestion_aware": 8.0,
+        "priority_lane": 1.2,
+        "detour": 5.5,
+    }.get(path_strategy, 2.0)
+    reservation_penalty = {
+        "shortest": 1.0,
+        "balanced": 3.0,
+        "congestion_aware": 10.0,
+        "priority_lane": 1.5,
+        "detour": 7.0,
+    }.get(path_strategy, 3.0)
+    base_row = round((origin[1] + target[1]) / 2)
+    lane_shift = ((lane % 5) - 2) * 2
+    preferred_row = {
+        "shortest": base_row,
+        "balanced": base_row + lane_shift,
+        "congestion_aware": base_row + 4 + lane_shift,
+        "priority_lane": round(rows * 0.22) + (lane % 2),
+        "detour": round(rows * 0.76) + lane_shift,
+    }.get(path_strategy, base_row)
+    preferred_row = max(1, min(rows - 2, preferred_row))
+    lane_weight = {
+        "shortest": 0.0,
+        "balanced": 0.035,
+        "congestion_aware": 0.065,
+        "priority_lane": 0.11,
+        "detour": 0.095,
+    }.get(path_strategy, 0.035)
 
     frontier: list[tuple[float, int, tuple[int, int]]] = [(0.0, 0, origin)]
     came_from: dict[tuple[int, int], tuple[int, int] | None] = {origin: None}
@@ -129,7 +322,12 @@ def _astar_route(start: dict[str, float], end: dict[str, float], navigation: dic
             nxt = current[0] + dx, current[1] + dy
             if not (0 <= nxt[0] < cols and 0 <= nxt[1] < rows) or blocked(nxt):
                 continue
-            next_cost = cost[current] + 1
+            next_cost = cost[current] + 1.0
+            if nxt in congestion:
+                next_cost += congestion_penalty
+            if nxt in reservations:
+                next_cost += reservation_penalty
+            next_cost += abs(nxt[1] - preferred_row) * lane_weight
             if next_cost >= cost.get(nxt, float("inf")):
                 continue
             cost[nxt] = next_cost
@@ -152,7 +350,14 @@ def _astar_route(start: dict[str, float], end: dict[str, float], navigation: dic
         if (previous[0] == node[0] == following[0]) or (previous[1] == node[1] == following[1]):
             continue
         points.append({"x": node[0] * step, "y": node[1] * step})
-    points.append({"x": float(end["x"]), "y": float(end["y"])})
+    # Clamp the final berth pose inside the drivable canvas so an offset
+    # station berth never renders an AGV outside the floor.
+    points.append(
+        {
+            "x": max(step, min(width - step, float(end["x"]))),
+            "y": max(step, min(height - step, float(end["y"]))),
+        }
+    )
     return points
 
 
@@ -164,6 +369,7 @@ def _initial_runtime(
     stations: dict[str, dict[str, float]] | None = None,
     station_pools: dict[str, list[dict[str, float]]] | None = None,
     navigation: dict[str, Any] | None = None,
+    task_roles: list[str] | None = None,
 ) -> dict[str, Any]:
     """Build the initial runtime state.
 
@@ -199,27 +405,44 @@ def _initial_runtime(
                 "energy": 0.0,
                 "completed_tasks": 0,
                 "waiting_seconds": 0.0,
+                "station_wait_seconds": 0.0,
+                "station_queue_wait_seconds": 0.0,
                 "blocked_streak": 0.0,
                 "active_seconds": 0.0,
                 "charging_seconds": 0.0,
                 "idle_seconds": 0.0,
                 "lane": index,
                 "route_lane": index % 3,
-                "type": str(agv_positions[index].get("type", "tote_amr")) if agv_positions and index < len(agv_positions) else "tote_amr",
+                "path_strategy": _PATH_STRATEGIES[index % len(_PATH_STRATEGIES)],
+                "type": str(agv_positions[index].get("type", "tote_amr"))
+                if agv_positions and index < len(agv_positions)
+                else "tote_amr",
             }
         )
     tasks = []
     cargos = []
     for index in range(order_count):
-        inbound = index % 3 == 0
+        if task_roles:
+            # Route between the stations the editor actually placed so the
+            # simulation exercises the real layout (and arms beside them run).
+            n = len(task_roles)
+            source_role = task_roles[index % n]
+            dest_role = task_roles[(index + 1 + (index % 2)) % n]
+            if dest_role == source_role and n > 1:
+                dest_role = task_roles[(index + 2) % n]
+            inbound = source_role in {"inbound", "storage"}
+        else:
+            inbound = index % 3 == 0
+            source_role = "inbound" if inbound else "storage"
+            dest_role = "storage" if inbound else "outbound"
         task_id = f"TASK-{index + 1:04d}"
         cargo_id = f"CARGO-{index + 1:04d}"
         tasks.append(
             {
                 "id": task_id,
                 "kind": "inbound" if inbound else "outbound",
-                "source": "inbound" if inbound else "storage",
-                "destination": "storage" if inbound else "outbound",
+                "source": source_role,
+                "destination": dest_role,
                 "priority": rng.randint(1, 5),
                 "weight": rng.randint(8, 45),
                 "status": "pending",
@@ -228,20 +451,27 @@ def _initial_runtime(
                 "started_at": None,
                 "completed_at": None,
                 "waiting_seconds": 0,
+                # Event-level station waiting: arrival at a work point until
+                # the pick/place resource actually starts service.
+                "station_arrived_at": None,
+                "service_started_at": None,
+                "station_wait_seconds": 0.0,
                 "cargo_id": cargo_id,
             }
         )
-        cargos.append({
-            "id": cargo_id,
-            "order_id": f"ORDER-{index + 1:04d}",
-            "sku": f"SKU-{1000 + index % 80:04d}",
-            "type": "pallet" if inbound else "tote",
-            "quantity": 1 + index % 4,
-            "weight": round(2.5 + (index % 12) * 1.4, 1),
-            "status": "receiving" if inbound else "on_shelf",
-            "location_id": "inbound" if inbound else "storage",
-            "task_id": task_id,
-        })
+        cargos.append(
+            {
+                "id": cargo_id,
+                "order_id": f"ORDER-{index + 1:04d}",
+                "sku": f"SKU-{1000 + index % 80:04d}",
+                "type": "pallet" if inbound else "tote",
+                "quantity": 1 + index % 4,
+                "weight": round(2.5 + (index % 12) * 1.4, 1),
+                "status": "receiving" if inbound else "on_shelf",
+                "location_id": "inbound" if inbound else "storage",
+                "task_id": task_id,
+            }
+        )
     return {
         "version": 2,
         "time": 0,
@@ -253,7 +483,8 @@ def _initial_runtime(
         "blocked_until": 0,
         "last_elapsed": 0,
         "stations": stations or deepcopy(STATIONS),
-        "station_pools": station_pools or {role: [deepcopy(position)] for role, position in (stations or STATIONS).items()},
+        "station_pools": station_pools
+        or {role: [deepcopy(position)] for role, position in (stations or STATIONS).items()},
         "navigation": navigation or {},
     }
 
@@ -261,7 +492,12 @@ def _initial_runtime(
 class SimulationService:
     """Persistent discrete-event warehouse runtime used by HTTP and WebSocket."""
 
-    def create(self, payload: Any, scenario_data: dict | None = None, scenario_version: int | None = None) -> SimulationRun:
+    def create(
+        self,
+        payload: Any,
+        scenario_data: dict | None = None,
+        scenario_version: int | None = None,
+    ) -> SimulationRun:
         """Create a simulation run.
 
         When *scenario_data* is provided, robot_count and AGV home positions are
@@ -281,7 +517,11 @@ class SimulationService:
 
         if scenario_data and isinstance(scenario_data, dict):
             components = scenario_data.get("components", [])
-            canvas = scenario_data.get("canvas", {}) if isinstance(scenario_data.get("canvas"), dict) else {}
+            canvas = (
+                scenario_data.get("canvas", {})
+                if isinstance(scenario_data.get("canvas"), dict)
+                else {}
+            )
             canvas_width = float(canvas.get("width", 1200))
             canvas_height = float(canvas.get("height", 1000))
             # Keep the standard workflow roles, but relocate every role that
@@ -290,8 +530,17 @@ class SimulationService:
             scene_stations = deepcopy(STATIONS)
             scene_station_pools = {role: [] for role in STATIONS}
             scene_stations["inbound"] = {"x": 45.0, "y": canvas_height / 2}
-            scene_stations["outbound"] = {"x": canvas_width - 45.0, "y": canvas_height / 2}
-            scene_navigation = {"width": canvas_width, "height": canvas_height, "grid_size": 40, "clearance": 26, "obstacles": []}
+            scene_stations["outbound"] = {
+                "x": canvas_width - 45.0,
+                "y": canvas_height / 2,
+            }
+            scene_navigation = {
+                "width": canvas_width,
+                "height": canvas_height,
+                "grid_size": 40,
+                "clearance": 26,
+                "obstacles": [],
+            }
             # Extract AGV components → positions + count
             for comp in components:
                 x = float(comp.get("x", 0))
@@ -303,31 +552,78 @@ class SimulationService:
                     properties = comp.get("properties") or {}
                     scene_strategy = str(properties.get("optimized_strategy", scene_strategy))
                     if isinstance(properties.get("evolution_parameters"), dict):
-                        scene_strategy_parameters = {key: float(value) for key, value in properties["evolution_parameters"].items() if key in {"speed", "distance_weight", "battery_weight", "charge_threshold"}}
-                    agv_positions.append({
-                        **center,
-                        "type": str((comp.get("properties") or {}).get("agv_type", "tote_amr")),
-                    })
+                        scene_strategy_parameters = {
+                            key: float(value)
+                            for key, value in properties["evolution_parameters"].items()
+                            if key
+                            in {
+                                "speed",
+                                "distance_weight",
+                                "battery_weight",
+                                "charge_threshold",
+                            }
+                        }
+                    agv_positions.append(
+                        {
+                            **center,
+                            "type": str((comp.get("properties") or {}).get("agv_type", "tote_amr")),
+                        }
+                    )
                 elif comp.get("type") == "station":
-                    station_type = str((comp.get("properties") or {}).get("station_type", "pick")).lower()
-                    role = {"pick": "pick", "pack": "pack", "storage": "storage", "inbound": "inbound", "outbound": "outbound"}.get(station_type)
+                    station_type = str(
+                        (comp.get("properties") or {}).get("station_type", "pick")
+                    ).lower()
+                    role = {
+                        "pick": "pick",
+                        "pack": "pack",
+                        "storage": "storage",
+                        "inbound": "inbound",
+                        "outbound": "outbound",
+                        "sort": "sort",
+                    }.get(station_type)
                     if role:
                         scene_station_pools.setdefault(role, []).append(center)
                         scene_stations[role] = scene_station_pools[role][0]
+                    # Stations are physical fixtures every AGV must route around;
+                    # the destination cell itself stays reachable (A* exempts the
+                    # target), so the path hugs the station instead of crossing it.
+                    scene_navigation["obstacles"].append(
+                        {"x": x, "y": y, "w": width, "h": height, "id": comp.get("id")}
+                    )
                 elif comp.get("type") == "charger":
                     scene_station_pools.setdefault("charge", []).append(center)
                     scene_stations["charge"] = scene_station_pools["charge"][0]
+                    scene_navigation["obstacles"].append(
+                        {"x": x, "y": y, "w": width, "h": height, "id": comp.get("id")}
+                    )
                 elif comp.get("type") == "shelf":
                     # Storage service points sit in the aisle outside the rack
                     # envelope; routing to the rack centre would still create
                     # a final visual segment through the shelf mesh.
-                    access = {"x": center["x"], "y": min(canvas_height - 35.0, y + height + 52.0)}
+                    access = {
+                        "x": center["x"],
+                        "y": min(canvas_height - 35.0, y + height + 52.0),
+                    }
                     scene_station_pools.setdefault("storage", []).append(access)
                     scene_stations["storage"] = scene_station_pools["storage"][0]
-                    scene_navigation["obstacles"].append({"x": x, "y": y, "w": width, "h": height, "id": comp.get("id")})
-                elif comp.get("type") == "obstacle":
-                    scene_navigation["obstacles"].append({"x": x, "y": y, "w": width, "h": height, "id": comp.get("id")})
+                    scene_navigation["obstacles"].append(
+                        {"x": x, "y": y, "w": width, "h": height, "id": comp.get("id")}
+                    )
+                elif comp.get("type") in {"obstacle", "arm", "conveyor"}:
+                    # Arms and conveyors are physical fixtures too — AGVs must route
+                    # around the pick/place cell, not through it.
+                    scene_navigation["obstacles"].append(
+                        {"x": x, "y": y, "w": width, "h": height, "id": comp.get("id")}
+                    )
             scene_robot_count = len(agv_positions)
+            # Task endpoints come from the stations the editor actually placed,
+            # so AGVs service the real layout (and arms bound to those stations
+            # light up during load/unload).  Charge bays are never task endpoints.
+            task_roles = [
+                role
+                for role in scene_station_pools
+                if role != "charge" and scene_station_pools.get(role)
+            ]
             for role, fallback in scene_stations.items():
                 if not scene_station_pools.get(role):
                     scene_station_pools[role] = [deepcopy(fallback)]
@@ -343,8 +639,14 @@ class SimulationService:
         order_count = int(payload.order_count)
         seed = int(payload.random_seed)
         runtime = _initial_runtime(
-            robot_count, order_count, seed, agv_positions or None, scene_stations,
-            scene_station_pools, scene_navigation,
+            robot_count,
+            order_count,
+            seed,
+            agv_positions or None,
+            scene_stations,
+            scene_station_pools,
+            scene_navigation,
+            task_roles if task_roles else None,
         )
 
         # Build scenario snapshot for reproducibility
@@ -385,7 +687,9 @@ class SimulationService:
         )
 
     @staticmethod
-    def _station_for_role(runtime: dict[str, Any], role: str, origin: dict[str, float]) -> dict[str, float]:
+    def _station_for_role(
+        runtime: dict[str, Any], role: str, origin: dict[str, float]
+    ) -> dict[str, float]:
         pools = runtime.get("station_pools", {})
         options = pools.get(role) or [runtime.get("stations", STATIONS).get(role, STATIONS["pick"])]
         return deepcopy(min(options, key=lambda item: _distance(origin, item)))
@@ -397,35 +701,82 @@ class SimulationService:
         )
         idle = [robot for robot in runtime["robots"] if robot["state"] == "idle"]
         for task in pending:
-            candidates = [robot for robot in idle if robot["battery"] > strategy["charge_threshold"]]
+            candidates = [
+                robot for robot in idle if robot["battery"] > strategy["charge_threshold"]
+            ]
             if not candidates:
                 break
             stations = runtime.get("stations", STATIONS)
             robot = min(
                 candidates,
-                key=lambda item: _distance(item, self._station_for_role(runtime, task["source"], item)) * strategy["distance_weight"]
-                + (100 - item["battery"]) * strategy["battery_weight"],
+                key=lambda item: (
+                    _distance(item, self._station_for_role(runtime, task["source"], item))
+                    * strategy["distance_weight"]
+                    + (100 - item["battery"]) * strategy["battery_weight"]
+                ),
             )
             source = self._station_for_role(runtime, task["source"], robot)
             destination = self._station_for_role(runtime, task["destination"], source)
-            task.update(status="active", assigned_robot=robot["id"], started_at=runtime["time"], source_position=source, destination_position=destination)
+            task.update(
+                status="active",
+                assigned_robot=robot["id"],
+                started_at=runtime["time"],
+                source_position=source,
+                destination_position=destination,
+            )
             robot.update(
                 state="to_pickup",
                 task_id=task["id"],
-                route=_route(robot, source, robot["lane"], stations, navigation=runtime.get("navigation")),
+                route=_route(
+                    robot,
+                    source,
+                    robot["lane"],
+                    stations,
+                    navigation=runtime.get("navigation"),
+                    path_strategy=robot.get("path_strategy", "balanced"),
+                    detour_offset=robot.get("lane", 0) * 1.5,
+                ),
                 route_lane=robot["lane"] % 3,
                 target_index=1,
             )
             idle.remove(robot)
 
     @staticmethod
+    def _start_station_service(
+        task: dict[str, Any] | None,
+        robot: dict[str, Any],
+        runtime: dict[str, Any],
+        waiting_state: str,
+    ) -> None:
+        """Transition a robot into service and retain an auditable wait time."""
+        if task is not None:
+            arrived = task.get("station_arrived_at")
+            if arrived is None:
+                arrived = runtime["time"]
+                task["station_arrived_at"] = arrived
+            task["service_started_at"] = runtime["time"]
+            task["station_wait_seconds"] = max(0.0, float(runtime["time"]) - float(arrived))
+        robot.update(
+            state="loading" if waiting_state == "waiting_pickup_resource" else "unloading",
+            remaining=3.0 if waiting_state == "waiting_pickup_resource" else 2.0,
+        )
+
+    @staticmethod
     def _cargo_for_task(runtime: dict[str, Any], task_id: str | None) -> dict[str, Any] | None:
         if not task_id:
             return None
-        return next((cargo for cargo in runtime.get("cargos", []) if cargo.get("task_id") == task_id), None)
+        return next(
+            (cargo for cargo in runtime.get("cargos", []) if cargo.get("task_id") == task_id),
+            None,
+        )
 
     @staticmethod
-    def _move(robot: dict[str, Any], dt: float, speed_factor: float, occupied: list[dict[str, Any]]) -> bool:
+    def _move(
+        robot: dict[str, Any],
+        dt: float,
+        speed_factor: float,
+        occupied: list[dict[str, Any]],
+    ) -> bool:
         route = robot["route"]
         target_index = int(robot["target_index"])
         if target_index >= len(route):
@@ -437,7 +788,10 @@ class SimulationService:
             robot["target_index"] += 1
             return robot["target_index"] >= len(route)
         step = min(distance, 52.0 * speed_factor * dt)
-        candidate = {"x": robot["x"] + dx / distance * step, "y": robot["y"] + dy / distance * step}
+        candidate = {
+            "x": robot["x"] + dx / distance * step,
+            "y": robot["y"] + dy / distance * step,
+        }
         # Route centre-lines are 38 scene units apart; a 28-unit reservation
         # radius gives adjacent lanes clearance while still protecting AGVs on
         # the same path.
@@ -460,23 +814,67 @@ class SimulationService:
             robot["target_index"] += 1
         return robot["target_index"] >= len(route)
 
-    def _advance(self, runtime: dict[str, Any], seconds: float, strategy_name: str | dict[str, float]) -> None:
-        strategy = strategy_name if isinstance(strategy_name, dict) else STRATEGIES.get(strategy_name, STRATEGIES["balanced"])
+    def _advance(
+        self,
+        runtime: dict[str, Any],
+        seconds: float,
+        strategy_name: str | dict[str, float],
+    ) -> None:
+        strategy = (
+            strategy_name
+            if isinstance(strategy_name, dict)
+            else STRATEGIES.get(strategy_name, STRATEGIES["balanced"])
+        )
         runtime["time"] += seconds
         self._dispatch(runtime, strategy)
         task_map = {task["id"]: task for task in runtime["tasks"]}
-        for robot in sorted(runtime["robots"], key=lambda item: (item["state"] == "idle", item["id"])):
+        for robot in sorted(
+            runtime["robots"], key=lambda item: (item["state"] == "idle", item["id"])
+        ):
             state = robot["state"]
             # Older persisted snapshots may not contain the counters introduced in v3.
             robot.setdefault("active_seconds", 0.0)
             robot.setdefault("charging_seconds", 0.0)
             robot.setdefault("idle_seconds", 0.0)
+            robot.setdefault("station_wait_seconds", 0.0)
+            robot.setdefault("station_queue_wait_seconds", 0.0)
+            robot.setdefault("path_strategy", "balanced")
             if state == "idle":
                 robot["idle_seconds"] += seconds
             elif state == "charging":
                 robot["charging_seconds"] += seconds
             else:
                 robot["active_seconds"] += seconds
+            # `station_wait_seconds` is the SERVICE time (actual pick/place
+            # duration at the station).  The queue wait — time an AGV spent
+            # arrived but blocked by a busy station/arm — lives on
+            # `station_queue_wait_seconds` and is the metric users call "等待".
+            if state in {"loading", "unloading"}:
+                robot["station_wait_seconds"] += seconds
+            elif state in {"waiting_pickup_resource", "waiting_dropoff_resource"}:
+                robot["station_queue_wait_seconds"] += seconds
+                task = task_map.get(robot["task_id"])
+                if task:
+                    role = (
+                        task["source"]
+                        if state == "waiting_pickup_resource"
+                        else task["destination"]
+                    )
+                    occupant = next(
+                        (
+                            r["id"]
+                            for r in runtime["robots"]
+                            if r["id"] != robot["id"]
+                            and r["state"] in {"loading", "unloading"}
+                            and (task_map.get(r["task_id"]) or {}).get(
+                                "source" if r["state"] == "loading" else "destination"
+                            )
+                            == role
+                        ),
+                        None,
+                    )
+                    if not occupant:
+                        self._start_station_service(task, robot, runtime, state)
             if state == "idle":
                 if robot["battery"] <= strategy["charge_threshold"]:
                     robot.update(state="charging", remaining=18.0)
@@ -500,11 +898,21 @@ class SimulationService:
                     if cargo:
                         cargo.update(status="on_agv", location_id=robot["id"])
                     stations = runtime.get("stations", STATIONS)
-                    destination = task.get("destination_position") or self._station_for_role(runtime, task["destination"], robot)
+                    destination = task.get("destination_position") or self._station_for_role(
+                        runtime, task["destination"], robot
+                    )
                     robot.update(
                         state="to_dropoff",
                         load_status="loaded",
-                        route=_route(robot, destination, robot["lane"] + 3, stations, navigation=runtime.get("navigation")),
+                        route=_route(
+                            robot,
+                            destination,
+                            robot["lane"] + 3,
+                            stations,
+                            navigation=runtime.get("navigation"),
+                            path_strategy=robot.get("path_strategy", "balanced"),
+                            detour_offset=robot.get("lane", 0) * 1.5,
+                        ),
                         route_lane=(robot["lane"] + 3) % 6,
                         target_index=1,
                     )
@@ -523,18 +931,38 @@ class SimulationService:
                         load_status="empty",
                         completed_tasks=robot["completed_tasks"] + 1,
                         remaining=0.0,
-                        route=_route(robot, robot["home"], robot["lane"], runtime.get("stations", STATIONS), use_berth=False, navigation=runtime.get("navigation")),
+                        route=_route(
+                            robot,
+                            robot["home"],
+                            robot["lane"],
+                            runtime.get("stations", STATIONS),
+                            use_berth=False,
+                            navigation=runtime.get("navigation"),
+                            path_strategy=robot.get("path_strategy", "balanced"),
+                            detour_offset=robot.get("lane", 0) * 1.5,
+                        ),
                         route_lane=robot["lane"] % 3,
                         target_index=1,
                     )
                 continue
             before_wait = robot["waiting_seconds"]
             occupied = [
-                {"x": float(other["x"]), "y": float(other["y"]), "route_lane": int(other.get("route_lane", other.get("lane", 0) % 3))}
+                {
+                    "x": float(other["x"]),
+                    "y": float(other["y"]),
+                    "route_lane": int(other.get("route_lane", other.get("lane", 0) % 3)),
+                }
                 for other in runtime["robots"]
                 if other["id"] != robot["id"]
             ]
-            reached = self._move(robot, seconds, strategy["speed"], occupied)
+            # Per-strategy speed adjustment:  a `detour` AGV moves slightly
+            # slower because it travels a longer physical path, while a
+            # `shortest` AGV makes the most of its native speed.
+            strategy_speed = strategy["speed"] * _PATH_STRATEGY_SLOWDOWN.get(
+                robot.get("path_strategy", "balanced"),
+                1.0,
+            )
+            reached = self._move(robot, seconds, strategy_speed, occupied)
             if robot["waiting_seconds"] > before_wait:
                 runtime["collision_avoided"] += 1
                 robot["blocked_streak"] = float(robot.get("blocked_streak", 0.0)) + seconds
@@ -547,25 +975,80 @@ class SimulationService:
                     stations = runtime.get("stations", STATIONS)
                     task = task_map.get(robot.get("task_id"))
                     if state == "to_pickup" and task:
-                        target = task.get("source_position") or self._station_for_role(runtime, task["source"], robot)
+                        target = task.get("source_position") or self._station_for_role(
+                            runtime, task["source"], robot
+                        )
                         robot["route_lane"] = (int(robot.get("route_lane", 0)) + 1) % 3
                     elif state == "to_dropoff" and task:
-                        target = task.get("destination_position") or self._station_for_role(runtime, task["destination"], robot)
+                        target = task.get("destination_position") or self._station_for_role(
+                            runtime, task["destination"], robot
+                        )
                         robot["route_lane"] = 3 + ((int(robot.get("route_lane", 3)) - 2) % 3)
                     else:
                         target = robot["home"]
                         robot["route_lane"] = (int(robot.get("route_lane", 0)) + 1) % 3
-                    robot.update(route=_route(robot, target, int(robot["route_lane"]), stations, navigation=runtime.get("navigation")), target_index=1, blocked_streak=0.0)
+                    robot.update(
+                        route=_route(
+                            robot,
+                            target,
+                            int(robot["route_lane"]),
+                            stations,
+                            navigation=runtime.get("navigation"),
+                            path_strategy=robot.get("path_strategy", "balanced"),
+                            detour_offset=robot.get("lane", 0) * 1.5,
+                        ),
+                        target_index=1,
+                        blocked_streak=0.0,
+                    )
             else:
                 robot["blocked_streak"] = 0.0
             if reached:
                 if state == "returning":
                     robot.update(state="idle", route=[robot["home"]], target_index=0)
-                else:
-                    robot.update(
-                        state="loading" if state == "to_pickup" else "unloading",
-                        remaining=3.0 if state == "to_pickup" else 2.0,
+                elif state in {"to_pickup", "to_dropoff"}:
+                    task = task_map.get(robot["task_id"])
+                    role = (
+                        task["source"]
+                        if state == "to_pickup"
+                        else task["destination"]
+                        if task
+                        else None
                     )
+                    occupant = (
+                        next(
+                            (
+                                r["id"]
+                                for r in runtime["robots"]
+                                if r["id"] != robot["id"]
+                                and r["state"] in {"loading", "unloading"}
+                                and (task_map.get(r["task_id"]) or {}).get(
+                                    "source" if r["state"] == "loading" else "destination"
+                                )
+                                == role
+                            ),
+                            None,
+                        )
+                        if role
+                        else None
+                    )
+                    if occupant:
+                        # Station / arm busy → queue and wait for the resource.
+                        robot.update(
+                            state="waiting_pickup_resource"
+                            if state == "to_pickup"
+                            else "waiting_dropoff_resource",
+                        )
+                    else:
+                        if task and task.get("station_arrived_at") is None:
+                            task["station_arrived_at"] = runtime["time"]
+                        self._start_station_service(
+                            task,
+                            robot,
+                            runtime,
+                            "waiting_pickup_resource"
+                            if state == "to_pickup"
+                            else "waiting_dropoff_resource",
+                        )
         for task in runtime["tasks"]:
             if task["status"] == "pending":
                 task["waiting_seconds"] += seconds
@@ -574,35 +1057,103 @@ class SimulationService:
     def _metrics(runtime: dict[str, Any]) -> dict[str, Any]:
         tasks = runtime["tasks"]
         completed = [task for task in tasks if task["status"] == "completed"]
-        durations = [task["completed_at"] - task["started_at"] for task in completed if task["started_at"] is not None]
+        durations = [
+            task["completed_at"] - task["started_at"]
+            for task in completed
+            if task["started_at"] is not None
+        ]
         active = [task for task in tasks if task["status"] == "active"]
-        waits = [float(task.get("waiting_seconds", 0)) for task in tasks]
-        average_duration = mean(durations) if durations else (mean([runtime["time"] - task["started_at"] for task in active]) if active else 0)
+        # "Wait time" is the time an AGV sat at a work point (pickup / dropoff)
+        # before the task was executed — the time the user actually sees a
+        # robot waiting on station.  Task-level pending time is the *order*
+        # wait, which lives on `task.waiting_seconds` and is reported
+        # separately as `pending_wait_seconds`.
+        station_waits = [
+            float(task.get("station_wait_seconds", 0.0))
+            for task in tasks
+            if task.get("service_started_at") is not None
+        ]
+        queue_waits = [
+            float(robot.get("station_queue_wait_seconds", 0.0)) for robot in runtime["robots"]
+        ]
+        pending_waits = [float(task.get("waiting_seconds", 0)) for task in tasks]
+        has_queue_runtime = any(q > 0 for q in queue_waits)
+        average_duration = (
+            mean(durations)
+            if durations
+            else (mean([runtime["time"] - task["started_at"] for task in active]) if active else 0)
+        )
+        # Real device utilization: aggregate per-robot active vs total time.
+        # Charging counts as "in service but not productive", idle as downtime.
+        total_active = sum(float(robot.get("active_seconds", 0.0)) for robot in runtime["robots"])
+        total_idle = sum(float(robot.get("idle_seconds", 0.0)) for robot in runtime["robots"])
+        total_charging = sum(
+            float(robot.get("charging_seconds", 0.0)) for robot in runtime["robots"]
+        )
+        total_seconds = total_active + total_idle + total_charging
+        device_utilization = round(total_active / total_seconds, 4) if total_seconds > 0 else 0.0
+        has_station_runtime = any(wait > 0 for wait in station_waits)
         return {
             "completion_rate": round(len(completed) / max(len(tasks), 1), 4),
             "average_duration": round(float(average_duration), 2),
-            "average_wait_seconds": round(mean(waits), 2) if waits else 0.0,
-            "max_wait_seconds": round(max(waits), 2) if waits else 0.0,
+            "average_wait_seconds": round(mean(station_waits), 2)
+            if has_station_runtime and station_waits
+            else 0.0,
+            "max_wait_seconds": round(max(station_waits), 2) if station_waits else 0.0,
+            "average_queue_wait_seconds": round(mean(queue_waits), 2)
+            if has_queue_runtime and queue_waits
+            else 0.0,
+            "p95_queue_wait_seconds": round(
+                sorted(queue_waits)[int(0.95 * (len(queue_waits) - 1))], 2
+            )
+            if has_queue_runtime and queue_waits
+            else 0.0,
+            "max_queue_wait_seconds": round(max(queue_waits), 2) if queue_waits else 0.0,
+            "pending_wait_seconds": round(mean(pending_waits), 2) if pending_waits else 0.0,
             "congestion_count": int(runtime["congestion_count"]),
             "energy": round(sum(float(robot["energy"]) for robot in runtime["robots"]), 3),
             "collision_avoided": int(runtime["collision_avoided"]),
             "active_tasks": len(active),
             "pending_tasks": sum(task["status"] == "pending" for task in tasks),
+            "device_utilization": device_utilization,
+            "has_runtime": 1 if total_seconds > 0 else 0,
         }
 
     def tick(self, run: SimulationRun, elapsed: int) -> dict[str, Any]:
-        config = deepcopy(run.config or {})
+        # Only deep-copy the runtime_snapshot — the rest of config
+        # (scenario_snapshot, metric_history, initial_runtime_snapshot) is
+        # read-only in this method and was previously copied on every tick.
+        config = run.config or {}
         runtime = deepcopy(config.get("runtime_snapshot")) or _initial_runtime(
-            int(config.get("robot_count", 8)), int(config.get("order_count", 20)), int(config.get("random_seed", 42))
+            int(config.get("robot_count", 8)),
+            int(config.get("order_count", 20)),
+            int(config.get("random_seed", 42)),
         )
         previous = int(runtime.get("last_elapsed", 0))
         steps = max(0, elapsed - previous)
+        strategy = config.get("strategy_parameters") or str(config.get("strategy", "balanced"))
+        # Feed real congestion into the navigator: cells where an AGV is blocked
+        # or queued for a station become avoidable for `congestion_aware` / `detour`.
+        _navigation = dict(runtime.get("navigation") or {})
+        _navigation["congestion_cells"] = [
+            {"x": float(r["x"]), "y": float(r["y"])}
+            for r in runtime["robots"]
+            if r.get("blocked_streak", 0.0) > 0
+            or r["state"] in {"waiting_pickup_resource", "waiting_dropoff_resource"}
+        ]
+        _navigation["reservation_cells"] = [
+            {"x": float(r["x"]), "y": float(r["y"])}
+            for r in runtime["robots"]
+            if r["state"] not in {"idle", "charging"}
+        ]
+        runtime["navigation"] = _navigation
         for _ in range(steps):
-            self._advance(runtime, 1.0, config.get("strategy_parameters") or str(config.get("strategy", "balanced")))
+            self._advance(runtime, 1.0, strategy)
         runtime["last_elapsed"] = elapsed
         metrics = self._metrics(runtime)
-        config["runtime_snapshot"] = runtime
-        run.config = config
+        # Build a new config dict: shallow-copy top-level keys (read-only
+        # values stay shared by reference) and replace only the mutated field.
+        run.config = {**config, "runtime_snapshot": runtime}
         run.metrics = metrics
         robots = [
             {
@@ -615,10 +1166,85 @@ class SimulationService:
                 "route": robot["route"],
                 "load_status": robot["load_status"],
                 "task_id": robot["task_id"],
+                "path_strategy": robot.get("path_strategy", "balanced"),
+                "station_wait_seconds": round(float(robot.get("station_wait_seconds", 0.0)), 2),
+                "station_queue_wait_seconds": round(
+                    float(robot.get("station_queue_wait_seconds", 0.0)), 2
+                ),
+                "waiting_seconds": round(float(robot.get("waiting_seconds", 0.0)), 2),
             }
             for robot in runtime["robots"]
         ]
         completed = sum(task["status"] == "completed" for task in runtime["tasks"])
+        # Arm linkage: every arm component declared in the editor carries an
+        # explicit `station_id` in its properties; here we flag which arm
+        # is currently servicing an AGV (i.e. an AGV is in loading / unloading
+        # at that arm's station) so the 3D view can drive the pick / place
+        # animation.  An arm without a station is decorative.
+        # Arm linkage: each arm lives next to a work station.  We light it up
+        # (`working`) only when an AGV is physically loading / unloading at
+        # that arm's station — i.e. the moment the pick / place hand-off
+        # actually happens.  This gives true per-arm, per-station linkage
+        # instead of a single global "something is busy" flag.
+        arm_states: list[dict[str, Any]] = []
+        scenario_components = (config.get("scenario_snapshot") or {}).get("components", [])
+        tick_task_map = {task["id"]: task for task in runtime["tasks"]}
+        # Distinct station components (each has its own id + coordinates), so
+        # multiple same-role stations are NOT merged into one representative.
+        station_components = [c for c in scenario_components if c.get("type") == "station"]
+        # An arm performs the pick/place hand-off for the AGV that is physically
+        # loading / unloading at its station.  We therefore bind each arm to its
+        # station by proximity and fire `working` whenever an AGV is actively
+        # servicing that station — independent of the (legacy) station-role
+        # vocabulary.  This is what makes "arm loads/unloads the AGV" true for
+        # every station the editor placed, not only inbound/storage/outbound.
+        loading_points: list[tuple[float, float]] = [
+            (float(r["x"]), float(r["y"]))
+            for r in runtime["robots"]
+            if r["state"] in {"loading", "unloading"}
+            and r.get("task_id")
+            and tick_task_map.get(r["task_id"])
+        ]
+        for component in scenario_components:
+            if component.get("type") != "arm":
+                continue
+            cx = float(component.get("x", 0)) + float(component.get("width", 0)) / 2
+            cy = float(component.get("y", 0)) + float(component.get("height", 0)) / 2
+            # Prefer an explicit station link from the editor; otherwise bind to
+            # the nearest placed station component (by coordinates).
+            linked_id = str((component.get("properties") or {}).get("station_id") or "")
+            nearest_station = None
+            best_distance = float("inf")
+            for st in station_components:
+                if linked_id and st.get("id") == linked_id:
+                    nearest_station = st
+                    break
+                sx = float(st.get("x", 0)) + float(st.get("width", 0)) / 2
+                sy = float(st.get("y", 0)) + float(st.get("height", 0)) / 2
+                distance = math.hypot(cx - sx, cy - sy)
+                if distance < best_distance:
+                    best_distance = distance
+                    nearest_station = st
+            working = False
+            target_id = linked_id
+            if nearest_station is not None:
+                target_id = linked_id or nearest_station.get("id", "")
+                sx = float(nearest_station.get("x", 0)) + float(nearest_station.get("width", 0)) / 2
+                sy = (
+                    float(nearest_station.get("y", 0)) + float(nearest_station.get("height", 0)) / 2
+                )
+                # Within ~130 scene units an AGV at the station is this arm's
+                # pick/place partner.  The radius comfortably covers the
+                # generated layout (arm sits ~90u from its station centre) plus
+                # the AGV's berth offset, while staying tighter than inter-station spacing.
+                working = any(math.hypot(px - sx, py - sy) < 130.0 for (px, py) in loading_points)
+            arm_states.append(
+                {
+                    "id": component.get("id"),
+                    "station_id": target_id,
+                    "state": "working" if working else "idle",
+                }
+            )
         return {
             "type": "simulation_tick",
             "run_id": run.id,
@@ -628,9 +1254,10 @@ class SimulationService:
             "task_items": runtime["tasks"],
             "cargos": runtime.get("cargos", []),
             "stations": runtime.get("stations", STATIONS),
+            "arm_states": arm_states,
             "events": run.events or [],
             "metrics": metrics,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
         }
 
     def control(self, run: SimulationRun, action: str) -> SimulationRun:
@@ -640,7 +1267,9 @@ class SimulationService:
         elif action == "stop":
             config = deepcopy(run.config or {})
             runtime = deepcopy(config.get("initial_runtime_snapshot")) or _initial_runtime(
-                int(config.get("robot_count", 8)), int(config.get("order_count", 20)), int(config.get("random_seed", 42))
+                int(config.get("robot_count", 8)),
+                int(config.get("order_count", 20)),
+                int(config.get("random_seed", 42)),
             )
             run.config = {
                 **config,
@@ -655,7 +1284,9 @@ class SimulationService:
     def add_anomaly(self, run: SimulationRun, anomaly_type: str, description: str) -> SimulationRun:
         config = deepcopy(run.config or {})
         runtime = deepcopy(config.get("runtime_snapshot")) or _initial_runtime(
-            int(config.get("robot_count", 8)), int(config.get("order_count", 20)), int(config.get("random_seed", 42))
+            int(config.get("robot_count", 8)),
+            int(config.get("order_count", 20)),
+            int(config.get("random_seed", 42)),
         )
         affected_robot_id = None
         if anomaly_type == "low_battery" and runtime["robots"]:
@@ -666,10 +1297,18 @@ class SimulationService:
             for index in range(5):
                 runtime["tasks"].append(
                     {
-                        "id": f"TASK-{start + index + 1:04d}", "kind": "outbound", "source": "storage",
-                        "destination": "outbound", "priority": 5, "weight": 20, "status": "pending",
-                        "assigned_robot": None, "created_at": runtime["time"], "started_at": None,
-                        "completed_at": None, "waiting_seconds": 0,
+                        "id": f"TASK-{start + index + 1:04d}",
+                        "kind": "outbound",
+                        "source": "storage",
+                        "destination": "outbound",
+                        "priority": 5,
+                        "weight": 20,
+                        "status": "pending",
+                        "assigned_robot": None,
+                        "created_at": runtime["time"],
+                        "started_at": None,
+                        "completed_at": None,
+                        "waiting_seconds": 0,
                     }
                 )
         elif anomaly_type in {"road_closed", "station_down"}:
@@ -681,33 +1320,60 @@ class SimulationService:
         events = deepcopy(run.events or [])
         events.append(
             {
-                "type": anomaly_type,
+                "id": f"event-{runtime['time']}-{anomaly_type}",
+                "type": "anomaly_injected",
                 "description": description or anomaly_type,
-                "severity": "warning",
+                "severity": "warn",
                 "robot_id": affected_robot_id,
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "data": {"anomaly_type": anomaly_type},
+                "created_at": datetime.now(UTC).isoformat(),
             }
         )
         run.events = events
         return run
 
-    def reassign_task(self, run: SimulationRun, task_id: str, robot_id: str | None = None, priority: int | None = None) -> SimulationRun:
+    def reassign_task(
+        self,
+        run: SimulationRun,
+        task_id: str,
+        robot_id: str | None = None,
+        priority: int | None = None,
+    ) -> SimulationRun:
         """Return a task to the real runtime queue or assign it to an idle AGV."""
         config = deepcopy(run.config or {})
         runtime = deepcopy(config.get("runtime_snapshot"))
         if not runtime:
             raise ValueError("Simulation runtime is not initialized")
-        task = next((item for item in runtime.get("tasks", []) if item.get("id") == task_id), None)
+        task = next(
+            (item for item in runtime.get("tasks", []) if item.get("id") == task_id),
+            None,
+        )
         if task is None:
             raise KeyError(task_id)
-        old_robot = next((item for item in runtime.get("robots", []) if item.get("id") == task.get("assigned_robot")), None)
+        old_robot = next(
+            (
+                item
+                for item in runtime.get("robots", [])
+                if item.get("id") == task.get("assigned_robot")
+            ),
+            None,
+        )
         if old_robot and old_robot.get("task_id") == task_id:
-            old_robot.update(state="idle", task_id=None, load_status="empty", route=[old_robot["home"]], target_index=0)
+            old_robot.update(
+                state="idle",
+                task_id=None,
+                load_status="empty",
+                route=[old_robot["home"]],
+                target_index=0,
+            )
         task.update(status="pending", assigned_robot=None, started_at=None)
         if priority is not None:
             task["priority"] = max(1, min(5, int(priority)))
         if robot_id:
-            robot = next((item for item in runtime.get("robots", []) if item.get("id") == robot_id), None)
+            robot = next(
+                (item for item in runtime.get("robots", []) if item.get("id") == robot_id),
+                None,
+            )
             if robot is None:
                 raise KeyError(robot_id)
             if robot.get("state") != "idle":
@@ -715,9 +1381,25 @@ class SimulationService:
             stations = runtime.get("stations", STATIONS)
             source = self._station_for_role(runtime, task["source"], robot)
             destination = self._station_for_role(runtime, task["destination"], source)
-            robot.update(state="to_pickup", task_id=task_id, route=_route(robot, source, int(robot.get("lane", 0)), stations, navigation=runtime.get("navigation")), route_lane=int(robot.get("lane", 0)) % 3, target_index=1)
+            robot.update(
+                state="to_pickup",
+                task_id=task_id,
+                route=_route(
+                    robot,
+                    source,
+                    int(robot.get("lane", 0)),
+                    stations,
+                    navigation=runtime.get("navigation"),
+                ),
+                route_lane=int(robot.get("lane", 0)) % 3,
+                target_index=1,
+            )
             task.update(source_position=source, destination_position=destination)
-            task.update(status="active", assigned_robot=robot_id, started_at=runtime.get("time", 0))
+            task.update(
+                status="active",
+                assigned_robot=robot_id,
+                started_at=runtime.get("time", 0),
+            )
         config["runtime_snapshot"] = runtime
         run.config = config
         return run
@@ -727,17 +1409,27 @@ class SimulationService:
         runtime = deepcopy(config.get("runtime_snapshot"))
         if not runtime:
             raise ValueError("Simulation runtime is not initialized")
-        robot = next((item for item in runtime.get("robots", []) if item.get("id") == robot_id), None)
+        robot = next(
+            (item for item in runtime.get("robots", []) if item.get("id") == robot_id),
+            None,
+        )
         if robot is None:
             raise KeyError(robot_id)
         if robot.get("task_id"):
             raise ValueError("AGV is executing a task")
-        robot.update(state="charging", remaining=18.0, route=[{"x": robot["x"], "y": robot["y"]}], target_index=0)
+        robot.update(
+            state="charging",
+            remaining=18.0,
+            route=[{"x": robot["x"], "y": robot["y"]}],
+            target_index=0,
+        )
         config["runtime_snapshot"] = runtime
         run.config = config
         return run
 
-    def add_order(self, run: SimulationRun, priority: int = 3, kind: str = "outbound") -> SimulationRun:
+    def add_order(
+        self, run: SimulationRun, priority: int = 3, kind: str = "outbound"
+    ) -> SimulationRun:
         config = deepcopy(run.config or {})
         runtime = deepcopy(config.get("runtime_snapshot"))
         if not runtime:
@@ -745,28 +1437,53 @@ class SimulationService:
         index = len(runtime.get("tasks", [])) + 1
         task_id, cargo_id = f"TASK-{index:04d}", f"CARGO-{index:04d}"
         inbound = kind == "inbound"
-        runtime.setdefault("tasks", []).append({
-            "id": task_id, "kind": "inbound" if inbound else "outbound",
-            "source": "inbound" if inbound else "storage", "destination": "storage" if inbound else "outbound",
-            "priority": max(1, min(5, int(priority))), "weight": 20, "status": "pending", "assigned_robot": None,
-            "created_at": runtime.get("time", 0), "started_at": None, "completed_at": None, "waiting_seconds": 0, "cargo_id": cargo_id,
-        })
-        runtime.setdefault("cargos", []).append({
-            "id": cargo_id, "order_id": f"ORDER-{index:04d}", "sku": f"SKU-{1000 + index % 80:04d}",
-            "type": "pallet" if inbound else "tote", "quantity": 1, "weight": 5.0,
-            "status": "receiving" if inbound else "on_shelf", "location_id": "inbound" if inbound else "storage", "task_id": task_id,
-        })
+        runtime.setdefault("tasks", []).append(
+            {
+                "id": task_id,
+                "kind": "inbound" if inbound else "outbound",
+                "source": "inbound" if inbound else "storage",
+                "destination": "storage" if inbound else "outbound",
+                "priority": max(1, min(5, int(priority))),
+                "weight": 20,
+                "status": "pending",
+                "assigned_robot": None,
+                "created_at": runtime.get("time", 0),
+                "started_at": None,
+                "completed_at": None,
+                "waiting_seconds": 0,
+                "cargo_id": cargo_id,
+            }
+        )
+        runtime.setdefault("cargos", []).append(
+            {
+                "id": cargo_id,
+                "order_id": f"ORDER-{index:04d}",
+                "sku": f"SKU-{1000 + index % 80:04d}",
+                "type": "pallet" if inbound else "tote",
+                "quantity": 1,
+                "weight": 5.0,
+                "status": "receiving" if inbound else "on_shelf",
+                "location_id": "inbound" if inbound else "storage",
+                "task_id": task_id,
+            }
+        )
         config["runtime_snapshot"] = runtime
         config["order_count"] = len(runtime["tasks"])
         run.config = config
         return run
 
-    def evaluate(self, config: dict[str, Any], strategy: str | dict[str, float], seed: int) -> dict[str, Any]:
+    def evaluate(
+        self, config: dict[str, Any], strategy: str | dict[str, float], seed: int
+    ) -> dict[str, Any]:
         # Every optimization trial starts from the exact editor-derived
         # devices, stations, obstacles and AGV homes captured at run creation.
         runtime = deepcopy(config.get("initial_runtime_snapshot"))
         if not runtime:
-            runtime = _initial_runtime(int(config.get("robot_count", 8)), int(config.get("order_count", 20)), seed)
+            runtime = _initial_runtime(
+                int(config.get("robot_count", 8)),
+                int(config.get("order_count", 20)),
+                seed,
+            )
         runtime["time"] = 0
         runtime["last_elapsed"] = 0
         for _ in range(900):
@@ -782,49 +1499,144 @@ class EvolutionService:
     def __init__(self, simulator: SimulationService):
         self.simulator = simulator
 
+    def _evaluate_individual(
+        self,
+        config: dict[str, Any],
+        genome: dict[str, float],
+        generation: int,
+        base_seed: int,
+        index: int,
+    ) -> dict[str, Any]:
+        """Evaluate one genome with 2 samples and return its aggregated row."""
+        samples = [
+            self.simulator.evaluate(config, genome, base_seed + generation * 20 + offset)
+            for offset in range(2)
+        ]
+        aggregate = {
+            key: round(mean(float(sample.get(key, 0)) for sample in samples), 4)
+            for key in (
+                "completion_rate",
+                "average_duration",
+                "congestion_count",
+                "energy",
+                "collision_avoided",
+            )
+        }
+        score = (
+            aggregate["completion_rate"] * 100
+            - aggregate["average_duration"] * 0.12
+            - aggregate["congestion_count"] * 1.8
+            - aggregate["energy"] * 0.4
+        )
+        return {
+            "strategy": f"evolved-g{generation + 1}-{index + 1}",
+            "generation": generation + 1,
+            "parameters": {key: round(value, 4) for key, value in genome.items()},
+            "score": round(score, 3),
+            "metrics": aggregate,
+            "runs": 2,
+        }
+
     def create(self, run: SimulationRun) -> Evolution:
         config = run.config or {}
         base_seed = int(config.get("random_seed", 42))
         rng = random.Random(base_seed)
         population: list[dict[str, float]] = [deepcopy(item) for item in STRATEGIES.values()]
         while len(population) < 10:
-            population.append({
-                "speed": rng.uniform(1.15, 2.0), "distance_weight": rng.uniform(.7, 1.8),
-                "battery_weight": rng.uniform(.6, 3.0), "charge_threshold": rng.uniform(12, 28),
-            })
+            population.append(
+                {
+                    "speed": rng.uniform(1.15, 2.0),
+                    "distance_weight": rng.uniform(0.7, 1.8),
+                    "battery_weight": rng.uniform(0.6, 3.0),
+                    "charge_threshold": rng.uniform(12, 28),
+                }
+            )
         trials: list[dict[str, Any]] = []
+        # Evaluate individuals within each generation in parallel.  Each
+        # evaluate() call operates on its own deepcopy of the runtime, so
+        # there is no shared mutable state between threads.
+        max_workers = min(4, len(population))
         for generation in range(4):
-            generation_rows: list[dict[str, Any]] = []
-            for index, genome in enumerate(population):
-                samples = [self.simulator.evaluate(config, genome, base_seed + generation * 20 + offset) for offset in range(2)]
-                aggregate = {key: round(mean(float(sample.get(key, 0)) for sample in samples), 4) for key in ("completion_rate", "average_duration", "congestion_count", "energy", "collision_avoided")}
-                score = aggregate["completion_rate"] * 100 - aggregate["average_duration"] * .12 - aggregate["congestion_count"] * 1.8 - aggregate["energy"] * .4
-                generation_rows.append({"strategy": f"evolved-g{generation + 1}-{index + 1}", "generation": generation + 1, "parameters": {key: round(value, 4) for key, value in genome.items()}, "score": round(score, 3), "metrics": aggregate, "runs": 2})
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {
+                    executor.submit(
+                        self._evaluate_individual,
+                        config,
+                        genome,
+                        generation,
+                        base_seed,
+                        index,
+                    ): index
+                    for index, genome in enumerate(population)
+                }
+                generation_rows: list[dict[str, Any]] = []
+                for future in as_completed(futures):
+                    generation_rows.append(future.result())
+            # Restore deterministic order so results are reproducible.
+            generation_rows.sort(key=lambda item: int(item["strategy"].split("-")[-1]))
             trials.extend(generation_rows)
             elites = sorted(generation_rows, key=lambda item: item["score"], reverse=True)[:4]
             population = [deepcopy(item["parameters"]) for item in elites]
             while len(population) < 10:
                 parent = deepcopy(rng.choice(elites)["parameters"])
-                parent["speed"] = max(1.0, min(2.2, parent["speed"] + rng.uniform(-.16, .16)))
-                parent["distance_weight"] = max(.5, min(2.2, parent["distance_weight"] + rng.uniform(-.18, .18)))
-                parent["battery_weight"] = max(.4, min(3.5, parent["battery_weight"] + rng.uniform(-.25, .25)))
-                parent["charge_threshold"] = max(10, min(32, parent["charge_threshold"] + rng.uniform(-3, 3)))
+                parent["speed"] = max(1.0, min(2.2, parent["speed"] + rng.uniform(-0.16, 0.16)))
+                parent["distance_weight"] = max(
+                    0.5, min(2.2, parent["distance_weight"] + rng.uniform(-0.18, 0.18))
+                )
+                parent["battery_weight"] = max(
+                    0.4, min(3.5, parent["battery_weight"] + rng.uniform(-0.25, 0.25))
+                )
+                parent["charge_threshold"] = max(
+                    10, min(32, parent["charge_threshold"] + rng.uniform(-3, 3))
+                )
                 population.append(parent)
         best = max(trials, key=lambda item: item["score"])
         baseline = self.simulator.evaluate(config, "balanced", base_seed)
+
         # Pareto front: no other trial is at least as good on all objectives.
         def dominates(left: dict[str, Any], right: dict[str, Any]) -> bool:
             lm, rm = left["metrics"], right["metrics"]
-            return lm["completion_rate"] >= rm["completion_rate"] and lm["average_duration"] <= rm["average_duration"] and lm["congestion_count"] <= rm["congestion_count"] and lm["energy"] <= rm["energy"] and lm != rm
-        pareto = [item for item in trials if not any(dominates(other, item) for other in trials if other is not item)]
-        optimized = {**best["metrics"], "strategy": best["strategy"], "score": best["score"], "parameters": best["parameters"], "pareto_size": len(pareto)}
+            return (
+                lm["completion_rate"] >= rm["completion_rate"]
+                and lm["average_duration"] <= rm["average_duration"]
+                and lm["congestion_count"] <= rm["congestion_count"]
+                and lm["energy"] <= rm["energy"]
+                and lm != rm
+            )
+
+        pareto = [
+            item
+            for item in trials
+            if not any(dominates(other, item) for other in trials if other is not item)
+        ]
+        optimized = {
+            **best["metrics"],
+            "strategy": best["strategy"],
+            "score": best["score"],
+            "parameters": best["parameters"],
+            "pareto_size": len(pareto),
+        }
         return Evolution(
             simulation_id=run.id,
             diagnosis=[
-                {"type": "optimizer", "message": f"已完成 4 代、{len(trials)} 次多目标候选评估，最优策略为 {best['strategy']}。"},
-                {"type": "comparison", "message": "所有评估均复用当前编辑器场景的设备、工位、障碍物与 AGV 起点。"},
-                {"type": "pareto", "message": f"得到 {len(pareto)} 个吞吐、等待、拥堵与能耗互不支配方案。", "items": pareto[:12]},
-                {"type": "trials", "message": "每一代参数、指标和评分均已记录，可用于复核和复现。", "items": trials},
+                {
+                    "type": "optimizer",
+                    "message": f"已完成 4 代、{len(trials)} 次多目标候选评估，最优策略为 {best['strategy']}。",
+                },
+                {
+                    "type": "comparison",
+                    "message": "所有评估均复用当前编辑器场景的设备、工位、障碍物与 AGV 起点。",
+                },
+                {
+                    "type": "pareto",
+                    "message": f"得到 {len(pareto)} 个吞吐、等待、拥堵与能耗互不支配方案。",
+                    "items": pareto[:12],
+                },
+                {
+                    "type": "trials",
+                    "message": "每一代参数、指标和评分均已记录，可用于复核和复现。",
+                    "items": trials,
+                },
             ],
             baseline_metrics=baseline,
             optimized_metrics=optimized,
