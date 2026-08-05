@@ -1,15 +1,17 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 def _utcnow() -> datetime:
     """Naive UTC now — replaces deprecated datetime.utcnow (SQLite stores naive)."""
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)
+
 
 def utcnow() -> datetime:
     """Naive UTC now — replaces deprecated datetime.utcnow (SQLite stores naive)."""
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)
+
 
 from sqlalchemy import JSON, DateTime, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
@@ -30,7 +32,9 @@ class Project(Base):
 
 class ProjectRequestKey(Base):
     __tablename__ = "project_request_keys"
-    __table_args__ = (UniqueConstraint("user_id", "request_key", name="uq_project_request_user_key"),)
+    __table_args__ = (
+        UniqueConstraint("user_id", "request_key", name="uq_project_request_user_key"),
+    )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     user_id: Mapped[str] = mapped_column(String(36), index=True)
     request_key: Mapped[str] = mapped_column(String(128))
@@ -40,7 +44,9 @@ class ProjectRequestKey(Base):
 
 class ScenarioRequestKey(Base):
     __tablename__ = "scenario_request_keys"
-    __table_args__ = (UniqueConstraint("user_id", "request_key", name="uq_scenario_request_user_key"),)
+    __table_args__ = (
+        UniqueConstraint("user_id", "request_key", name="uq_scenario_request_user_key"),
+    )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     user_id: Mapped[str] = mapped_column(String(36), index=True)
     request_key: Mapped[str] = mapped_column(String(128))
@@ -128,6 +134,7 @@ class Scenario(Base):
 
 class ScenarioVersion(Base):
     __tablename__ = "scenario_versions"
+    __table_args__ = (UniqueConstraint("scenario_id", "version", name="uq_scenario_version"),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     scenario_id: Mapped[str] = mapped_column(String(36), index=True)
     version: Mapped[int] = mapped_column(index=True)
@@ -152,7 +159,9 @@ class SimulationSnapshot(Base):
     """An immutable, queryable checkpoint produced by the authoritative runtime."""
 
     __tablename__ = "simulation_snapshots"
-    __table_args__ = (UniqueConstraint("simulation_id", "elapsed", name="uq_simulation_snapshot_elapsed"),)
+    __table_args__ = (
+        UniqueConstraint("simulation_id", "elapsed", name="uq_simulation_snapshot_elapsed"),
+    )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     simulation_id: Mapped[str] = mapped_column(String(36), index=True)
     elapsed: Mapped[int] = mapped_column(index=True)
@@ -166,28 +175,36 @@ class SimulationTaskRecord(Base):
     """Current task projection. Runtime JSON remains the engine state; this is for UI/querying."""
 
     __tablename__ = "simulation_task_records"
-    __table_args__ = (UniqueConstraint("simulation_id", "task_id", name="uq_simulation_task_record"),)
+    __table_args__ = (
+        UniqueConstraint("simulation_id", "task_id", name="uq_simulation_task_record"),
+    )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     simulation_id: Mapped[str] = mapped_column(String(36), index=True)
     task_id: Mapped[str] = mapped_column(String(64), index=True)
     status: Mapped[str] = mapped_column(String(32), index=True)
     assigned_robot: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, index=True
+    )
 
 
 class SimulationCargoRecord(Base):
     """Current cargo projection, allowing traceability without parsing a run JSON blob."""
 
     __tablename__ = "simulation_cargo_records"
-    __table_args__ = (UniqueConstraint("simulation_id", "cargo_id", name="uq_simulation_cargo_record"),)
+    __table_args__ = (
+        UniqueConstraint("simulation_id", "cargo_id", name="uq_simulation_cargo_record"),
+    )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     simulation_id: Mapped[str] = mapped_column(String(36), index=True)
     cargo_id: Mapped[str] = mapped_column(String(64), index=True)
     status: Mapped[str] = mapped_column(String(32), index=True)
     location_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, index=True
+    )
 
 
 class SimulationRuntimeLease(Base):
@@ -208,7 +225,9 @@ class SimulationRuntimeState(Base):
     runtime: Mapped[dict] = mapped_column(JSON, default=dict)
     initial_runtime: Mapped[dict] = mapped_column(JSON, default=dict)
     revision: Mapped[int] = mapped_column(default=0)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, index=True
+    )
 
 
 class SimulationEventRecord(Base):

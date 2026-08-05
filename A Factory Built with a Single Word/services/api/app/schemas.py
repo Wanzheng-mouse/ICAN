@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+
 class ProjectCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     requirement: str = ""
@@ -110,7 +111,7 @@ class GenerationCandidateRead(BaseModel):
     reasons: list[str] = Field(default_factory=list)
     cautions: list[str] = Field(default_factory=list)
     expected_metrics: dict[str, float] = Field(default_factory=dict)
-    data: "ScenarioData"
+    data: ScenarioData
 
 
 class GenerationCandidatesRead(BaseModel):
@@ -153,11 +154,26 @@ class ScenarioData(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+class TemplateCreate(BaseModel):
+    """Payload for persisting a user-created resource-center template."""
+
+    title: str = Field(min_length=1, max_length=120)
+    description: str = ""
+    category: str = Field(default="scene", max_length=32)
+    cover: str = Field(default="warehouse", max_length=64)
+    industry: str = Field(default="通用", max_length=64)
+    difficulty: str = Field(default="easy", max_length=32)
+    scenario: ScenarioData = Field(default_factory=ScenarioData)
+
+
 GenerationCandidateRead.model_rebuild()
 
 
 class TemplateDetailRead(TemplateRead):
-    data: ScenarioData = Field(validation_alias="scenario")
+    # Field name must be `data` (frontend + API contract read it as such).
+    # The router maps the ORM `Template.scenario` attribute into this field
+    # explicitly, so no validation alias is needed.
+    data: ScenarioData
 
 
 class TemplateApplyCreate(BaseModel):
